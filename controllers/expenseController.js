@@ -4,7 +4,7 @@ import { invalidateStatsCache } from "../utils/statsCache.js";
 
 export const addExpense = async (req, res) => {
     try {
-        const { details, amount, type, category, date } = req.body
+        const { details, amount, type, category, date, clientId } = req.body
 
         if (!details || !amount || !type || !date) {
             return res.status(403).send("Please provide all the expense details")
@@ -22,9 +22,19 @@ export const addExpense = async (req, res) => {
         session.startTransaction();
 
         try {
+            if (clientId) {
+                const existing = await Expense.findOne({ userId: req.userId, clientId }).session(session);
+                if (existing) {
+                    await session.commitTransaction();
+                    session.endSession();
+                    return res.status(200).send({ "id": existing._id });
+                }
+            }
+
             // Save expense
             const expense = new Expense({
                 userId: req.userId,
+                clientId,
                 details,
                 amount: parsedAmount,
                 type,
@@ -41,15 +51,6 @@ export const addExpense = async (req, res) => {
                 { session }
             );
 
-            // 3. If user has an admin, update their balance too
-            if (user.admin) {
-                await User.findByIdAndUpdate(
-                    user.admin, // admin is a userId
-                    { $inc: { netBalance: signedAmount } },
-                    { session }
-                );
-            }
-
             // Commit transaction
             await session.commitTransaction();
             session.endSession();
@@ -58,16 +59,26 @@ export const addExpense = async (req, res) => {
 
             return res.status(200).send({ "id": expense._id });
         } catch (innerError) {
+            if (innerError?.code === 11000 && clientId) {
+                const existing = await Expense.findOne({ userId: req.userId, clientId });
+                if (existing) {
+                    await session.abortTransaction();
+                    session.endSession();
+                    return res.status(200).send({ "id": existing._id });
+                }
+            }
             await session.abortTransaction();
             session.endSession();
             console.error(innerError);
             return res.status(500).send("Failed to save expense and update balance");
         }
+
     } catch (error) {
         console.log(error);
         return res.send(error)
     }
 }
+
 export const removeExpense = async (req, res) => {
     try {
         const id = req.params.id
@@ -81,20 +92,12 @@ export const removeExpense = async (req, res) => {
 
             await Expense.findByIdAndDelete(id, { session })
 
-            const user = await User.findByIdAndUpdate(
+            await User.findByIdAndUpdate(
                 req.userId,
                 { $inc: { netBalance: signedAmount } },
                 { session }
             );
 
-            // 3. If user has an admin, update their balance too
-            if (user.admin) {
-                await User.findByIdAndUpdate(
-                    user.admin, // admin is a userId
-                    { $inc: { netBalance: signedAmount } },
-                    { session }
-                );
-            }
             // Commit transaction
             await session.commitTransaction();
             session.endSession();
@@ -139,13 +142,9 @@ export const editExpense = async (req, res) => {
                     { $inc: { netBalance: signedAmount } },
                     { session }
                 );
+
                 // 3. If user has an admin, update their balance too
-                if (user.admin) {
-                    await User.findByIdAndUpdate(
-                        user.admin, // admin is a userId
-                        { $inc: { netBalance: signedAmount } },
-                        { session }
-                    );
+                if (user?.admin) {
                 }
             }
             await Expense.findByIdAndUpdate(id, { amount, details, category, date: new Date(date) }, { session });

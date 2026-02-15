@@ -9,7 +9,8 @@ import {
     signup,
     verifyAccess,
     googleAuth,
-    updateProfile
+    updateProfile,
+    upgradeToAdmin
 } from '../controllers/userController.js'
 
 const router = express.Router()
@@ -20,6 +21,7 @@ router.post("/google-login", googleAuth);
 router.post('/logout', logout)
 router.post('/changePassword', verifyAccess, changePassword)
 router.post('/refresh', refresh)
+router.post('/upgrade-to-admin', verifyAccess, upgradeToAdmin)
 router.post('/forgotPassword/requestOtp', requestPasswordResetOTP);
 router.post('/forgotPassword/reset', resetPassword);
 router.put('/update-profile', verifyAccess, updateProfile);

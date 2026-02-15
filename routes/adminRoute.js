@@ -1,11 +1,10 @@
 import express from 'express'
-import { assignBalance, deleteUser, edituserExpense, getAllUsers, getUser, getUserExpenses, registerUser, removeUserExpense } from '../controllers/adminController.js'
+import { assignBalance, deleteUser, edituserExpense, getAllUsers, getUserExpenses, registerUser, removeUserExpense } from '../controllers/adminController.js'
 import { getMonthlyStats } from '../controllers/statsController.js'
 
 const router = express.Router()
 
 router.get('/users', getAllUsers)
-router.get('/user/:userId', getUser)
 router.post('/stats/user', getMonthlyStats) // Re-using the same controller, it expects body.userId 
 router.get('/expenses/:userId', getUserExpenses)
 router.post('/registeruser', registerUser)

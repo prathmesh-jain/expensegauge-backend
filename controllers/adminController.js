@@ -55,8 +55,6 @@ export const deleteUser = async (req, res) => {
 
     try {
         await Expense.deleteMany({ userId }); // Delete all expenses for the user
-        const user = await User.findById(userId)
-        await User.findByIdAndUpdate(req.userId, { $inc: { netBalance: -(user.netBalance) } },)
         const deletedUser = await User.findByIdAndDelete(userId); // Then delete the user
         if (!deletedUser) {
             return res.status(404).json({ message: 'User not found' });
@@ -107,12 +105,6 @@ export const assignBalance = async (req, res) => {
             { session }
         );
 
-        await User.findByIdAndUpdate(
-            req.userId,
-            { $inc: { netBalance: parsedAmount } },
-            { session }
-        );
-
         // Commit transaction
         await session.commitTransaction();
         session.endSession();
@@ -132,23 +124,13 @@ export const getAllUsers = async (req, res) => {
         const offset = parseInt(req.query.offset) || 0;
         const limit = parseInt(req.query.limit) || 10;
 
+        const adminObjectId = mongoose.Types.ObjectId.createFromHexString(req.userId);
+
         const users = await User.aggregate([
-            { $match: { admin: mongoose.Types.ObjectId.createFromHexString(req.userId) } },
-            { $sort: { createdAt: -1 } },   // optional: show latest users first
+            { $match: { admin: adminObjectId } },
+            { $sort: { createdAt: -1 } },
             { $skip: offset },
             { $limit: limit },
-            {
-                $lookup: {
-                    from: 'expenses',
-                    let: { userId: '$_id' },
-                    pipeline: [
-                        { $match: { $expr: { $eq: ['$userId', '$$userId'] } } },
-                        { $sort: { date: -1 } },
-                        { $limit: 10 }
-                    ],
-                    as: 'expenses'
-                }
-            },
             {
                 $project: {
                     password: 0,
@@ -163,11 +145,16 @@ export const getAllUsers = async (req, res) => {
         ]);
         const totalCount = await User.countDocuments({ admin: req.userId });
         const hasMore = offset + users.length < totalCount;
-        const admin = await User.findById(req.userId)
+
+        const totalAgg = await User.aggregate([
+            { $match: { admin: adminObjectId } },
+            { $group: { _id: null, total: { $sum: '$netBalance' } } }
+        ]);
+        const totalUserBalance = totalAgg?.[0]?.total ?? 0;
 
         return res.status(200).json({
             users,
-            totalUserBalance: admin.netBalance,
+            totalUserBalance,
             hasMore,
         });
     } catch (error) {
@@ -189,12 +176,6 @@ export const removeUserExpense = async (req, res) => {
         try {
 
             await Expense.findByIdAndDelete(id, { session })
-
-            await User.findByIdAndUpdate(
-                req.userId,
-                { $inc: { netBalance: signedAmount } },
-                { session }
-            );
 
             await User.findByIdAndUpdate(
                 userId,
@@ -236,11 +217,6 @@ export const edituserExpense = async (req, res) => {
             if (parseFloat(amount) !== expense.amount) {
                 const signedAmount = parseFloat(amount) - expense.amount
                 await User.findByIdAndUpdate(
-                    req.userId,
-                    { $inc: { netBalance: signedAmount } },
-                    { session }
-                );
-                await User.findByIdAndUpdate(
                     userId,
                     { $inc: { netBalance: signedAmount } },
                     { session }
@@ -265,12 +241,16 @@ export const edituserExpense = async (req, res) => {
 
 export const getUserExpenses = async (req, res) => {
     const userId = req.params.userId;
-    console.log("enter", req.query.offset, req.query.limit);
     const offset = parseInt(req.query.offset) || 0;
     const limit = parseInt(req.query.limit) || 10;
 
     if (!userId) {
         return res.status(400).json({ message: 'User ID is required' });
+    }
+
+    const user = await User.findById(userId).select('netBalance name');
+    if (!user) {
+        return res.status(404).json({ message: 'User not found' });
     }
 
     const expenses = await Expense.find({ userId })
@@ -283,22 +263,10 @@ export const getUserExpenses = async (req, res) => {
 
     return res.status(200).json({
         expenses,
+        user,
         hasMore,
     });
 }
 
-export const getUser = async (req, res) => {
-    try {
-        const { userId } = req.params;
-        const user = await User.findById(userId).select('-password -refreshTokens -updatedAt -username -__v -admin -role');
-        if (!user) {
-            return res.status(404).json({ message: 'User not found' });
-        }
-        return res.status(200).json(user);
-    } catch (error) {
-        console.log(error);
-        res.status(500).json({ message: 'Error getting user' });
-    }
-}
 
 

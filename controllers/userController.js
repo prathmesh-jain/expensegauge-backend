@@ -15,6 +15,7 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 export const signup = async (req, res) => {
     const { name, email, password, role } = req.body;
     if (!name || !email || !password || !role) return res.status(403).send("Please enter all details")
+
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
     if (!passwordRegex.test(password)) {
         return res.status(400).send({ "message": "Password does not meet policy requirements" })
@@ -43,7 +44,7 @@ export const signup = async (req, res) => {
     newuser.refreshTokens.push({ token: refreshToken });
     await newuser.save();
 
-    return res.status(200).send({ accessToken, refreshToken, name: newuser.name, role: newuser.role, profilePicture: newuser.profilePicture })
+    return res.status(200).send({ accessToken, refreshToken, name: newuser.name, email: newuser.email, role: newuser.role, profilePicture: newuser.profilePicture })
 }
 
 export const login = async (req, res) => {
@@ -75,9 +76,66 @@ export const login = async (req, res) => {
     }
     await user.save();
 
-    return res.status(200).send({ accessToken, refreshToken, name: user.name, role: user.role, profilePicture: user.profilePicture })
+    return res.status(200).send({ accessToken, refreshToken, name: user.name, email: user.email, role: user.role, profilePicture: user.profilePicture })
 }
 
+
+export const upgradeToAdmin = async (req, res) => {
+    try {
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).send({ message: 'User not found' });
+        }
+
+        if (user.admin) {
+            return res.status(403).send({ message: 'Managed users cannot register as admin. Please create a new account to access admin privileges.' });
+        }
+
+        if (user.role === 'admin') {
+            return res.status(200).send({
+                message: 'Already an admin',
+                name: user.name,
+                email: user.email,
+                role: user.role,
+                profilePicture: user.profilePicture
+            });
+        }
+
+        user.role = 'admin';
+
+        const accessToken = jwt.sign(
+            { userId: user._id, role: user.role },
+            process.env.ACCESS_SECRET,
+            { expiresIn: '1h' }
+        );
+
+        const refreshToken = jwt.sign(
+            { userId: user._id },
+            process.env.REFRESH_SECRET,
+            { expiresIn: '30d' }
+        );
+
+        user.refreshTokens.push({ token: refreshToken });
+        if (user.refreshTokens.length > 5) {
+            user.refreshTokens.shift();
+        }
+
+        await user.save();
+
+        return res.status(200).send({
+            message: 'Upgraded to admin',
+            accessToken,
+            refreshToken,
+            name: user.name,
+            email: user.email,
+            role: user.role,
+            profilePicture: user.profilePicture,
+        });
+    } catch (error) {
+        console.error(error);
+        return res.status(500).send({ message: 'Failed to upgrade to admin' });
+    }
+}
 
 export const googleAuth = async (req, res) => {
     try {
@@ -176,7 +234,6 @@ export const verifyAccess = (req, res, next) => {
 
 export const refresh = async (req, res) => {
     const { refreshToken } = req.body;
-    console.log("enter refresh");
 
     if (!refreshToken) return res.sendStatus(401);
 
@@ -189,7 +246,6 @@ export const refresh = async (req, res) => {
         // Check if refreshToken exists in DB
         const tokenIndex = user.refreshTokens.findIndex(rt => rt.token === refreshToken);
         if (tokenIndex === -1) return res.sendStatus(403); // token reuse/invalid
-        console.log(tokenIndex);
 
         // Rotate: remove old, issue new
         user.refreshTokens.splice(tokenIndex, 1); // remove old
@@ -306,7 +362,6 @@ export const resetPassword = async (req, res) => {
 
 export const changePassword = async (req, res) => {
     try {
-        console.log("enter change");
 
         const { oldPassword, newPassword } = req.body;
         const user = await User.findById(req.userId);
@@ -347,7 +402,6 @@ export const updateProfile = async (req, res) => {
 export const logout = async (req, res) => {
     const { refreshToken } = req.body;
     if (!refreshToken) return res.sendStatus(400);
-    console.log("inside logout");
 
     try {
         const payload = jwt.verify(refreshToken, process.env.REFRESH_SECRET);
