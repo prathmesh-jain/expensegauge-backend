@@ -3,7 +3,6 @@ import Update from '../models/updateModel.js';
 export const checkUpdate = async (req, res) => {
     try {
         const clientAppVersion = req.headers['x-app-version'];
-        const clientOtaVersion = req.headers['x-ota-version'];
         const platform = req.headers['x-platform'];
 
         if (!clientAppVersion || !platform) {
@@ -15,7 +14,6 @@ export const checkUpdate = async (req, res) => {
         if (!config) {
             return res.json({ updateAvailable: false });
         }
-
         // Check for Force Update / APK Update
         const isMinVersionMet = compareVersions(clientAppVersion, config.minAppVersion) >= 0;
         const isNewAppVersionAvailable = compareVersions(config.latestAppVersion, clientAppVersion) > 0;
@@ -32,17 +30,6 @@ export const checkUpdate = async (req, res) => {
             });
         }
 
-        // Check for OTA Update
-        if (config.latestOtaVersion && clientOtaVersion !== config.latestOtaVersion) {
-            return res.json({
-                updateAvailable: true,
-                updateType: 'OTA',
-                forceUpdate: false,
-                latestOtaVersion: config.latestOtaVersion,
-                message: 'A new background update is available.',
-            });
-        }
-
         // Normal APK Update (not forced)
         if (isNewAppVersionAvailable) {
             return res.json({
@@ -52,7 +39,7 @@ export const checkUpdate = async (req, res) => {
                 latestAppVersion: config.latestAppVersion,
                 apkUrl: config.apkUrl,
                 playStoreUrl: config.playStoreUrl,
-                message: 'A new version of the app is available.',
+                message: `A new version of the app is available. ${config.latestAppVersion}`,
             });
         }
 

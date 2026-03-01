@@ -14,10 +14,6 @@ const updateSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
-    latestOtaVersion: {
-        type: String,
-        required: true,
-    },
     forceUpdate: {
         type: Boolean,
         default: false,
