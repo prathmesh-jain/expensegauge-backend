@@ -9,9 +9,6 @@ dotenv.config()
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 
-// Configure Resend (moved to utils/emailService.js)
-
-
 export const signup = async (req, res) => {
     const { name, email, password, role } = req.body;
     if (!name || !email || !password || !role) return res.status(403).send("Please enter all details")
