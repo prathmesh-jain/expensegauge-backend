@@ -4,6 +4,7 @@ import User from '../models/userModel.js'
 import mongoose from 'mongoose'
 import Expense from '../models/expenseModel.js'
 import { invalidateStatsCache } from '../utils/statsCache.js'
+import { recalculateAfterBalances } from '../utils/expenseBalance.js'
 
 export const registerUser = async (req, res) => {
     const { name, email, password } = req.body;
@@ -105,6 +106,8 @@ export const assignBalance = async (req, res) => {
             { session }
         );
 
+        await recalculateAfterBalances(userId, session);
+
         // Commit transaction
         await session.commitTransaction();
         session.endSession();
@@ -182,6 +185,7 @@ export const removeUserExpense = async (req, res) => {
                 { $inc: { netBalance: signedAmount } },
                 { session }
             );
+            await recalculateAfterBalances(userId, session);
             // Commit transaction
             await session.commitTransaction();
             session.endSession();
@@ -223,6 +227,7 @@ export const edituserExpense = async (req, res) => {
                 );
             }
             await Expense.findByIdAndUpdate(id, { amount, details, date: new Date(date) }, { session });
+            await recalculateAfterBalances(userId, session);
             // Commit transaction
             await session.commitTransaction();
             session.endSession();
@@ -254,15 +259,24 @@ export const getUserExpenses = async (req, res) => {
     }
 
     const expenses = await Expense.find({ userId })
-        .sort({ date: -1 })
+        .sort({ date: -1, createdAt: -1 })
+        .skip(offset)
+        .limit(limit);
+
+    if (expenses.some((expense) => typeof expense.afterBalance !== "number")) {
+        await recalculateAfterBalances(userId);
+    }
+
+    const latestExpenses = await Expense.find({ userId })
+        .sort({ date: -1, createdAt: -1 })
         .skip(offset)
         .limit(limit);
 
     const totalCount = await Expense.countDocuments({ userId });
-    const hasMore = offset + expenses.length < totalCount;
+    const hasMore = offset + latestExpenses.length < totalCount;
 
     return res.status(200).json({
-        expenses,
+        expenses: latestExpenses,
         user,
         hasMore,
     });

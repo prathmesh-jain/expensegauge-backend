@@ -16,6 +16,10 @@ const expenseSchema = new mongoose.Schema({
   date: {
     type: Date,
     required: true
+  },
+  afterBalance: {
+    type: Number,
+    default: 0,
   }
 }, { timestamps: true });
 

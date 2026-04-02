@@ -1,6 +1,7 @@
 import Expense from "../models/expenseModel.js";
 import User from "../models/userModel.js";
 import { invalidateStatsCache } from "../utils/statsCache.js";
+import { getRangeFilter, recalculateAfterBalances } from "../utils/expenseBalance.js";
 
 export const addExpense = async (req, res) => {
     try {
@@ -51,6 +52,8 @@ export const addExpense = async (req, res) => {
                 { session }
             );
 
+            await recalculateAfterBalances(req.userId, session);
+
             // Commit transaction
             await session.commitTransaction();
             session.endSession();
@@ -97,6 +100,8 @@ export const removeExpense = async (req, res) => {
                 { $inc: { netBalance: signedAmount } },
                 { session }
             );
+
+            await recalculateAfterBalances(req.userId, session);
 
             // Commit transaction
             await session.commitTransaction();
@@ -148,6 +153,7 @@ export const editExpense = async (req, res) => {
                 }
             }
             await Expense.findByIdAndUpdate(id, { amount, details, category, date: new Date(date) }, { session });
+            await recalculateAfterBalances(req.userId, session);
             // Commit transaction
             await session.commitTransaction();
             session.endSession();
@@ -168,6 +174,7 @@ export const getExpenses = async (req, res) => {
     const userId = req.userId;
     const offset = parseInt(req.query.offset) || 0;
     const limit = parseInt(req.query.limit) || 10;
+    const range = req.query.range || "all_time";
 
     if (!userId) {
         return res.status(400).json({ message: 'User ID is required' });
@@ -177,16 +184,33 @@ export const getExpenses = async (req, res) => {
         return res.status(401).json({ message: 'User not found' });
     }
 
-    const expenses = await Expense.find({ userId })
+    const filter = { userId, ...getRangeFilter(range) };
+
+    let expenses = await Expense.find(filter)
         .sort({ date: -1, createdAt: -1 })
         .skip(offset)
         .limit(limit);
-    const totalCount = await Expense.countDocuments({ userId });
+
+    if (expenses.some((expense) => typeof expense.afterBalance !== "number")) {
+        await recalculateAfterBalances(userId);
+        expenses = await Expense.find(filter)
+            .sort({ date: -1, createdAt: -1 })
+            .skip(offset)
+            .limit(limit);
+    }
+
+    const totalCount = await Expense.countDocuments(filter);
     const hasMore = offset + expenses.length < totalCount;
+    const rangeExpenses = await Expense.find(filter).select("amount type");
+    const rangeBalance = rangeExpenses.reduce((sum, expense) => (
+        expense.type === "debit" ? sum - expense.amount : sum + expense.amount
+    ), 0);
 
     return res.status(200).json({
         expenses,
         totalBalance: user.netBalance,
+        rangeBalance,
+        range,
         hasMore,
     });
 }
