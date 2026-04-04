@@ -82,7 +82,7 @@ export const drawPill = (doc, x, y, text, style) => {
     return width;
 };
 
-export const drawHeader = (doc, user, startDate, endDate) => {
+export const drawHeader = (doc, user, start, end) => {
     const logoX = 50;
     const logoY = 40;
 
@@ -103,7 +103,7 @@ export const drawHeader = (doc, user, startDate, endDate) => {
     }
 
     doc.fillColor(COLORS.secondary).font('Regular').fontSize(8).text('REPORT PERIOD', 400, 45, { align: 'right', width: 150 });
-    doc.fillColor(COLORS.primary).font('Bold').fontSize(11).text(`${startDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`, 400, 58, { align: 'right', width: 150 });
+    doc.fillColor(COLORS.primary).font('Bold').fontSize(11).text(`${start.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} - ${end.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`, 400, 58, { align: 'right', width: 150 });
 
     doc.fillColor(COLORS.primary).font('Bold').fontSize(28).text('Expense Analysis', 50, 100);
     doc.fillColor(COLORS.secondary).font('Regular').fontSize(11).text('Prepared for: ', 50, 135, { continued: true });
@@ -324,11 +324,22 @@ export const addFooters = (doc) => {
 export const generateReport = async (req, res) => {
     try {
         const requesterId = req.userId;
-        const { type, targetUserId } = req.body || {};
+        const { type, targetUserId, startDate, endDate } = req.body || {};
         if (!requesterId) return res.sendStatus(401);
-
+        if (!startDate || !endDate) {
+            return res.status(400).json({
+                error: "startDate and endDate are required"
+            });
+        }
         const requester = await User.findById(requesterId);
         if (!requester || !requester.email) return res.status(400).send("Requester email not found");
+
+        const start = new Date(startDate);
+        const end = new Date(endDate);
+
+        if (isNaN(start) || isNaN(end)) {
+            return res.status(400).json({ error: "Invalid date format" });
+        }
 
         // Determine whose report we are generating
         let userIdToReport = requesterId;
@@ -342,27 +353,9 @@ export const generateReport = async (req, res) => {
         const reportUser = await User.findById(userIdToReport);
         if (!reportUser) return res.status(404).send("Target user not found");
 
-        const now = new Date();
-        let startDate = new Date();
-        let endDate = new Date();
-
-        if (type === 'monthly') {
-            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-            endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-        } else if (type === 'weekly') {
-            startDate.setDate(now.getDate() - 7);
-        } else if (type === 'yearly') {
-            startDate = new Date(now.getFullYear(), 0, 1);
-        } else if (type === 'custom') {
-            if (req.body.startDate) startDate = new Date(req.body.startDate);
-            if (req.body.endDate) endDate = new Date(req.body.endDate);
-        } else {
-            startDate.setMonth(now.getMonth() - 1);
-        }
-
         const expenses = await Expense.find({
             userId: userIdToReport,
-            date: { $gte: startDate, $lte: endDate }
+            date: { $gte: start, $lte: end }
         }).sort({ date: -1 });
 
         const income = expenses.filter(e => e.type === 'credit' || e.type === 'assign').reduce((sum, e) => sum + e.amount, 0);
@@ -385,7 +378,7 @@ export const generateReport = async (req, res) => {
             try {
                 const subject = isAdminReport
                     ? `Expense Analysis Report for ${reportUser.name}`
-                    : `Your Expense Analysis Report - ${startDate.toLocaleDateString()} to ${endDate.toLocaleDateString()}`;
+                    : `Your Expense Analysis Report - ${start.toLocaleDateString()} to ${end.toLocaleDateString()}`;
 
                 const emailText = isAdminReport
                     ? `Attached is the detailed expense analysis report for ${reportUser.name} (${reportUser.email}), as you requested.`
@@ -405,7 +398,7 @@ export const generateReport = async (req, res) => {
             }
         });
 
-        drawHeader(doc, reportUser, startDate, endDate);
+        drawHeader(doc, reportUser, start, end);
         drawSummaryCards(doc, income, expenseTotal, savings);
 
         let tableStartY = 285;
