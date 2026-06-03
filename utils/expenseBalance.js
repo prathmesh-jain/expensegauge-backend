@@ -27,10 +27,14 @@ export const recalculateAfterBalances = async (userId, session = null) => {
 
 export const getRangeBounds = (range = "all_time") => {
   const now = new Date();
+  const currentDayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const nextDayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
   const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
 
   switch (range) {
+    case "current_day":
+      return { startDate: currentDayStart, endDate: nextDayStart };
     case "current_month":
       return { startDate: currentMonthStart, endDate: nextMonthStart };
     case "last_month":
