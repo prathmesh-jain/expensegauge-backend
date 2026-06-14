@@ -1,21 +1,24 @@
 const statsCache = new Map();
 
-export const getStatsFromCache = (userId) => {
-    if (statsCache.has(userId)) {
-        console.log(`Serving stats from cache for user: ${userId}`);
-        return statsCache.get(userId);
+export const getStatsFromCache = (cacheKey) => {
+    if (statsCache.has(cacheKey)) {
+        console.log(`Serving stats from cache: ${cacheKey}`);
+        return statsCache.get(cacheKey);
     }
     return null;
 };
 
-export const setStatsToCache = (userId, data) => {
-    console.log(`Caching stats for user: ${userId}`);
-    statsCache.set(userId, data);
+export const setStatsToCache = (cacheKey, data) => {
+    console.log(`Caching stats: ${cacheKey}`);
+    statsCache.set(cacheKey, data);
 };
 
 export const invalidateStatsCache = (userId) => {
-    if (statsCache.has(userId)) {
-        console.log(`Invalidating stats cache for user: ${userId}`);
-        statsCache.delete(userId);
+    // Invalidate all cache entries for this user
+    for (const key of statsCache.keys()) {
+        if (key.startsWith(`${userId}-`)) {
+            console.log(`Invalidating stats cache: ${key}`);
+            statsCache.delete(key);
+        }
     }
 };
