@@ -89,13 +89,36 @@ export const addExpense = async (req, res) => {
         if (!details || !amount || !type || !date) {
             return res.status(403).send("Please provide all the expense details")
         }
-        // Sanitize and convert amount to a number
-        const parsedAmount = parseFloat(amount);
-        if (isNaN(parsedAmount)) {
-            return res.status(400).send("Amount must be a valid number");
+        // --- Server-side validation ---
+        if (typeof details !== 'string' || !details.trim()) {
+            return res.status(400).json({ message: 'Details/description is required and cannot be empty' });
         }
+        const trimmedDetails = details.trim();
+
+        if (!amount && amount !== 0) {
+            return res.status(400).json({ message: 'Amount is required' });
+        }
+        const parsedAmount = parseFloat(amount);
+        if (isNaN(parsedAmount) || parsedAmount <= 0) {
+            return res.status(400).json({ message: 'Amount must be a valid positive number' });
+        }
+
+        if (!type || !['credit', 'debit'].includes(type.toLowerCase())) {
+            return res.status(400).json({ message: 'Type must be either "credit" or "debit"' });
+        }
+        const normalizedType = type.toLowerCase();
+
+        if (!date) {
+            return res.status(400).json({ message: 'Date is required' });
+        }
+        const expenseDate = new Date(date);
+        if (isNaN(expenseDate.getTime())) {
+            return res.status(400).json({ message: 'Invalid date format provided' });
+        }
+
+        const trimmedCategory = category ? category.trim() : undefined;
         // Calculate signed amount
-        const signedAmount = type === 'credit' ? parsedAmount : -parsedAmount;
+        const signedAmount = normalizedType === 'credit' ? parsedAmount : -parsedAmount;
 
         // Start a transaction (optional but safer for consistency)
         const session = await Expense.startSession();
@@ -115,14 +138,13 @@ export const addExpense = async (req, res) => {
             const resolvedSourceId = await resolveAndValidateSourceId(req.userId, sourceId, session);
 
             // Save expense
-            const expenseDate = new Date(date);
             const expense = new Expense({
                 userId: req.userId,
                 clientId,
-                details,
+                details: trimmedDetails,
                 amount: parsedAmount,
-                type,
-                category: type === 'credit' ? 'Income' : category,
+                type: normalizedType,
+                category: normalizedType === 'credit' ? 'Income' : (trimmedCategory || 'Other'),
                 date: expenseDate,
                 sourceId: resolvedSourceId,
             });
@@ -264,6 +286,32 @@ export const editExpense = async (req, res) => {
             return res.status(404).json({ message: 'Expense not found' });
         }
         
+        // --- Server-side validation for edited fields ---
+        if (details !== undefined) {
+            if (typeof details !== 'string' || !details.trim()) {
+                return res.status(400).json({ message: 'Details cannot be empty' });
+            }
+        }
+        
+        if (amount !== undefined) {
+            const parsedAmount = parseFloat(amount);
+            if (isNaN(parsedAmount) || parsedAmount <= 0) {
+                return res.status(400).json({ message: 'Amount must be a valid positive number' });
+            }
+        }
+        
+        if (date !== undefined) {
+            const expenseDate = new Date(date);
+            if (isNaN(expenseDate.getTime())) {
+                return res.status(400).json({ message: 'Invalid date format provided' });
+            }
+        }
+        
+        if (category !== undefined && typeof category === 'string') {
+            // Trim category if provided
+            req.body.category = category.trim();
+        }
+        
         const session = await Expense.startSession();
         session.startTransaction();
 
@@ -341,7 +389,12 @@ export const editExpense = async (req, res) => {
                 }
             }
 
-            const updateFields = { amount, details, category, date: new Date(date) };
+            const updateFields = {
+                amount: amount !== undefined ? parseFloat(amount) : expense.amount,
+                details: details !== undefined ? details.trim() : expense.details,
+                category: category !== undefined ? category.trim() : expense.category,
+                date: date !== undefined ? new Date(date) : expense.date,
+            };
             updateFields.sourceId = newSourceId;
             await Expense.findByIdAndUpdate(id, updateFields, { session });
             await recalculateAfterBalances(req.userId, session);
