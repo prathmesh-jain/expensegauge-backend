@@ -3,10 +3,17 @@ import userRoute from './routes/userRoute.js'
 import expenseRoute from './routes/expenseRoute.js'
 import adminRoute from './routes/adminRoute.js'
 import updateRoute from './routes/updateRoutes.js'
+import accountRoute from './routes/accountRoute.js'
 import cors from 'cors'
 import { verifyAccess } from './controllers/userController.js'
 import { connectDB } from './config/dbConnection.js'
 import { verifyAdminAccess } from './controllers/adminController.js'
+import dns from 'dns'
+
+dns.setServers([
+    '1.1.1.1',
+    '1.0.0.1'
+]);
 
 connectDB()
 const app = express()
@@ -24,6 +31,7 @@ app.get('/api/v1/health', (req, res) => {
 app.use('/api/v1/update', updateRoute)
 app.use('/api/v1/user', userRoute)
 app.use('/api/v1/expense', verifyAccess, expenseRoute)
+app.use('/api/v1/account', verifyAccess, accountRoute)
 app.use('/api/v1/admin', verifyAdminAccess, adminRoute)
 app.listen(port, "0.0.0.0", () => {
     console.log("server running on", port);

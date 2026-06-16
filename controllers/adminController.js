@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken'
 import User from '../models/userModel.js'
 import mongoose from 'mongoose'
 import Expense from '../models/expenseModel.js'
+import AccountSource from '../models/accountModel.js'
 import { invalidateStatsCache } from '../utils/statsCache.js'
 import { recalculateAfterBalances } from '../utils/expenseBalance.js'
 
@@ -56,6 +57,7 @@ export const deleteUser = async (req, res) => {
 
     try {
         await Expense.deleteMany({ userId }); // Delete all expenses for the user
+        await AccountSource.deleteMany({ userId }); // Delete all accounts for the user
         const deletedUser = await User.findByIdAndDelete(userId); // Then delete the user
         if (!deletedUser) {
             return res.status(404).json({ message: 'User not found' });

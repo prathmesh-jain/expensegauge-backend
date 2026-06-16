@@ -5,19 +5,79 @@ export const getMonthlyStats = async (req, res) => {
     try {
         // userId might be in body (for admin POST) or implied in req.userId (for normal users GET)
         const targetUserId = req.body?.userId || req.query?.userId || req.userId;
+        const sourceId = req.query?.sourceId || null;
+        const range = req.query?.range || 'all_time';
 
         if (!targetUserId) {
             return res.status(400).json({ message: "User ID is required" });
         }
 
-        // 1. Check Cache
-        const cachedStats = getStatsFromCache(targetUserId);
+        // 1. Build cache key with filters (userId-range-sourceId)
+        const cacheKey = `${targetUserId}-${range}-${sourceId || 'all'}`;
+
+        // 2. Check Cache
+        const cachedStats = getStatsFromCache(cacheKey);
         if (cachedStats) {
             return res.status(200).json(cachedStats);
         }
 
-        // 2. Fetch Expenses
-        const expenses = await Expense.find({ userId: targetUserId }).select("amount type date");
+        // 3. Build query filter
+        const queryFilter = { userId: targetUserId };
+        if (sourceId) {
+            queryFilter.sourceId = sourceId;
+        }
+
+        // Apply date range filter
+        if (range !== 'all_time') {
+            const today = new Date();
+            let startDate;
+            
+            if (range === 'current_day') {
+                startDate = new Date(
+                    today.getFullYear(),
+                    today.getMonth(),
+                    today.getDate()
+                );
+            }
+            else if (range === 'current_month') {
+                startDate = new Date(
+                    today.getFullYear(),
+                    today.getMonth(),
+                    1
+                );
+            }
+            else if (range === 'last_month') {
+                const start = new Date(
+                    today.getFullYear(),
+                    today.getMonth() - 1,
+                    1
+                );
+
+                const end = new Date(
+                    today.getFullYear(),
+                    today.getMonth(),
+                    1
+                );
+
+                queryFilter.date = {
+                    $gte: start,
+                    $lt: end
+                };
+            }
+            else if (range === 'last_3_months') {
+                startDate = new Date(
+                    today.getFullYear(),
+                    today.getMonth() - 3,
+                    1
+                );
+            }
+            if (startDate && range !== 'last_month') {
+                queryFilter.date = { $gte: startDate };
+            }
+        }
+
+        // 4. Fetch Expenses
+        const expenses = await Expense.find(queryFilter).select("amount type date");
 
         // 3. Process Data
         const last12Months = [];
@@ -76,7 +136,7 @@ export const getMonthlyStats = async (req, res) => {
         };
 
         // 5. Cache and Return
-        setStatsToCache(targetUserId, responseData);
+        setStatsToCache(cacheKey, responseData);
         res.status(200).json(responseData);
 
     } catch (error) {

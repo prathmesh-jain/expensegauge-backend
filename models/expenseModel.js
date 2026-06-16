@@ -20,6 +20,11 @@ const expenseSchema = new mongoose.Schema({
   afterBalance: {
     type: Number,
     default: 0,
+  },
+  sourceId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'AccountSource',
+    default: null,
   }
 }, { timestamps: true });
 
