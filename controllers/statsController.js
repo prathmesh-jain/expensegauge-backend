@@ -14,7 +14,7 @@ export const getMonthlyStats = async (req, res) => {
 
         // 1. Build cache key with filters (userId-range-sourceId)
         const cacheKey = `${targetUserId}-${range}-${sourceId || 'all'}`;
-        
+
         // 2. Check Cache
         const cachedStats = getStatsFromCache(cacheKey);
         if (cachedStats) {
@@ -26,28 +26,52 @@ export const getMonthlyStats = async (req, res) => {
         if (sourceId) {
             queryFilter.sourceId = sourceId;
         }
-        
+
         // Apply date range filter
         if (range !== 'all_time') {
             const today = new Date();
             let startDate;
             
-            if (range === 'today') {
-                startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-            } else if (range === 'week') {
-                startDate = new Date(today);
-                startDate.setDate(today.getDate() - 7);
-            } else if (range === 'month') {
-                startDate = new Date(today.getFullYear(), today.getMonth(), 1);
-            } else if (range === '3months') {
-                startDate = new Date(today.getFullYear(), today.getMonth() - 3, 1);
-            } else if (range === '6months') {
-                startDate = new Date(today.getFullYear(), today.getMonth() - 6, 1);
-            } else if (range === 'year') {
-                startDate = new Date(today.getFullYear(), 0, 1);
+            if (range === 'current_day') {
+                startDate = new Date(
+                    today.getFullYear(),
+                    today.getMonth(),
+                    today.getDate()
+                );
             }
-            
-            if (startDate) {
+            else if (range === 'current_month') {
+                startDate = new Date(
+                    today.getFullYear(),
+                    today.getMonth(),
+                    1
+                );
+            }
+            else if (range === 'last_month') {
+                const start = new Date(
+                    today.getFullYear(),
+                    today.getMonth() - 1,
+                    1
+                );
+
+                const end = new Date(
+                    today.getFullYear(),
+                    today.getMonth(),
+                    1
+                );
+
+                queryFilter.date = {
+                    $gte: start,
+                    $lt: end
+                };
+            }
+            else if (range === 'last_3_months') {
+                startDate = new Date(
+                    today.getFullYear(),
+                    today.getMonth() - 3,
+                    1
+                );
+            }
+            if (startDate && range !== 'last_month') {
                 queryFilter.date = { $gte: startDate };
             }
         }
