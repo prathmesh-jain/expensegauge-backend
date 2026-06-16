@@ -430,11 +430,13 @@ export const getExpenses = async (req, res) => {
     }
 
     const filter = { userId, ...getRangeFilter(range) };
+    let accountBalance = null;
     if (sourceId) {
         // Validate sourceId belongs to user
-        const validAccount = await AccountSource.findOne({ _id: sourceId, userId }, '_id');
+        const validAccount = await AccountSource.findOne({ _id: sourceId, userId }, '_id currentBalance');
         if (validAccount) {
             filter.sourceId = sourceId;
+            accountBalance = validAccount.currentBalance;
         }
         // If invalid, ignore the filter rather than returning nothing
     }
@@ -463,6 +465,7 @@ export const getExpenses = async (req, res) => {
         expenses,
         totalBalance: user.netBalance,
         rangeBalance,
+        accountBalance,
         range,
         hasMore,
     });
