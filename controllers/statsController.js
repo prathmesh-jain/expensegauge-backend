@@ -1,5 +1,24 @@
 import Expense from "../models/expenseModel.js";
+import AccountSource from "../models/accountModel.js";
+import { getRangeBounds, getRangeFilter } from "../utils/expenseBalance.js";
 import { getStatsFromCache, setStatsToCache } from "../utils/statsCache.js";
+
+const formatCurrencyValue = (value = 0) => Number(value.toFixed(2));
+
+const buildStatsFilter = async ({ userId, sourceId, range }) => {
+    const queryFilter = { userId, ...getRangeFilter(range) };
+
+    if (!sourceId) {
+        return queryFilter;
+    }
+
+    const validAccount = await AccountSource.findOne({ _id: sourceId, userId }, "_id");
+    if (validAccount) {
+        queryFilter.sourceId = sourceId;
+    }
+
+    return queryFilter;
+};
 
 export const getMonthlyStats = async (req, res) => {
     try {
@@ -22,59 +41,11 @@ export const getMonthlyStats = async (req, res) => {
         }
 
         // 3. Build query filter
-        const queryFilter = { userId: targetUserId };
-        if (sourceId) {
-            queryFilter.sourceId = sourceId;
-        }
-
-        // Apply date range filter
-        if (range !== 'all_time') {
-            const today = new Date();
-            let startDate;
-            
-            if (range === 'current_day') {
-                startDate = new Date(
-                    today.getFullYear(),
-                    today.getMonth(),
-                    today.getDate()
-                );
-            }
-            else if (range === 'current_month') {
-                startDate = new Date(
-                    today.getFullYear(),
-                    today.getMonth(),
-                    1
-                );
-            }
-            else if (range === 'last_month') {
-                const start = new Date(
-                    today.getFullYear(),
-                    today.getMonth() - 1,
-                    1
-                );
-
-                const end = new Date(
-                    today.getFullYear(),
-                    today.getMonth(),
-                    1
-                );
-
-                queryFilter.date = {
-                    $gte: start,
-                    $lt: end
-                };
-            }
-            else if (range === 'last_3_months') {
-                startDate = new Date(
-                    today.getFullYear(),
-                    today.getMonth() - 3,
-                    1
-                );
-            }
-            if (startDate && range !== 'last_month') {
-                queryFilter.date = { $gte: startDate };
-            }
-        }
+        const queryFilter = await buildStatsFilter({
+            userId: targetUserId,
+            sourceId,
+            range,
+        });
 
         // 4. Fetch Expenses
         const expenses = await Expense.find(queryFilter).select("amount type date");
@@ -142,5 +113,154 @@ export const getMonthlyStats = async (req, res) => {
     } catch (error) {
         console.error("Error calculating stats:", error);
         res.status(500).json({ message: "Server error calculating statistics" });
+    }
+};
+
+export const getExpenseAnalytics = async (req, res) => {
+    try {
+        console.log("insisde stats")
+        const targetUserId = req.body?.userId || req.query?.userId || req.userId;
+        const sourceId = req.query?.sourceId || null;
+        const range = req.query?.range || "all_time";
+
+        if (!targetUserId) {
+            return res.status(400).json({ message: "User ID is required" });
+        }
+
+        const cacheKey = `${targetUserId}-analytics-${range}-${sourceId || "all"}`;
+        const cachedAnalytics = getStatsFromCache(cacheKey);
+        if (cachedAnalytics) {
+            return res.status(200).json(cachedAnalytics);
+        }
+
+        const queryFilter = await buildStatsFilter({
+            userId: targetUserId,
+            sourceId,
+            range,
+        });
+
+        const expenses = await Expense.find(queryFilter)
+            .select("amount type date category sourceId details")
+            .sort({ date: -1, createdAt: -1 });
+
+        const debitExpenses = expenses.filter((expense) => expense.type?.toLowerCase() === "debit");
+        const totalSpend = debitExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+        const totalTransactions = debitExpenses.length;
+
+        const categoryTotals = {};
+        const accountTotals = {};
+        const weekdayTotals = {
+            Sunday: 0,
+            Monday: 0,
+            Tuesday: 0,
+            Wednesday: 0,
+            Thursday: 0,
+            Friday: 0,
+            Saturday: 0,
+        };
+        const activeDates = new Set();
+
+        debitExpenses.forEach((expense) => {
+            const categoryName = expense.category || "Other";
+            categoryTotals[categoryName] = (categoryTotals[categoryName] || 0) + expense.amount;
+
+            const accountKey = expense.sourceId?.toString() || "unknown";
+            accountTotals[accountKey] = (accountTotals[accountKey] || 0) + expense.amount;
+
+            const expenseDate = new Date(expense.date);
+            if (!Number.isNaN(expenseDate.getTime())) {
+                activeDates.add(expenseDate.toISOString().slice(0, 10));
+                const weekday = expenseDate.toLocaleDateString("en-US", { weekday: "long" });
+                weekdayTotals[weekday] = (weekdayTotals[weekday] || 0) + expense.amount;
+            }
+        });
+
+        const accountIds = Object.keys(accountTotals).filter((accountId) => accountId !== "unknown");
+        const accounts = accountIds.length
+            ? await AccountSource.find({ _id: { $in: accountIds }, userId: targetUserId }).select("name")
+            : [];
+        const accountNameMap = new Map(accounts.map((account) => [account._id.toString(), account.name]));
+
+        const toBreakdown = (entries, getLabel) =>
+            entries
+                .sort((a, b) => b[1] - a[1])
+                .map(([key, amount]) => ({
+                    key,
+                    label: getLabel(key),
+                    amount: formatCurrencyValue(amount),
+                    percentage: totalSpend > 0 ? formatCurrencyValue((amount / totalSpend) * 100) : 0,
+                }));
+
+        const categoryBreakdown = toBreakdown(
+            Object.entries(categoryTotals),
+            (category) => category
+        );
+
+        const accountBreakdown = toBreakdown(
+            Object.entries(accountTotals),
+            (accountId) => accountNameMap.get(accountId) || "Unassigned account"
+        );
+
+        const largestExpense = debitExpenses.reduce((largest, expense) => (
+            !largest || expense.amount > largest.amount ? expense : largest
+        ), null);
+
+        const highestCategory = categoryBreakdown[0] || null;
+        const topAccount = accountBreakdown[0] || null;
+        const topWeekdayEntry = Object.entries(weekdayTotals)
+            .sort((a, b) => b[1] - a[1])[0];
+
+        const { startDate, endDate } = getRangeBounds(range);
+        const sortedByDateAsc = [...debitExpenses].sort((a, b) => new Date(a.date) - new Date(b.date));
+        const effectiveStart = startDate || (sortedByDateAsc[0] ? new Date(sortedByDateAsc[0].date) : null);
+        const effectiveEnd = endDate || (sortedByDateAsc[sortedByDateAsc.length - 1] ? new Date(sortedByDateAsc[sortedByDateAsc.length - 1].date) : null);
+        const periodDayCount = effectiveStart && effectiveEnd
+            ? Math.max(1, Math.ceil((effectiveEnd.getTime() - effectiveStart.getTime()) / (1000 * 60 * 60 * 24)))
+            : 0;
+        const averageDailySpend = periodDayCount > 0 ? totalSpend / periodDayCount : 0;
+
+        const responseData = {
+            summary: {
+                totalSpend: formatCurrencyValue(totalSpend),
+                totalTransactions,
+                averageDailySpend: formatCurrencyValue(averageDailySpend),
+                activeDays: activeDates.size,
+            },
+            categoryBreakdown,
+            accountBreakdown,
+            insights: {
+                largestExpense: largestExpense
+                    ? {
+                        amount: formatCurrencyValue(largestExpense.amount),
+                        details: largestExpense.details,
+                        category: largestExpense.category || "Other",
+                        date: largestExpense.date,
+                    }
+                    : null,
+                topWeekday: topWeekdayEntry && topWeekdayEntry[1] > 0
+                    ? { day: topWeekdayEntry[0], amount: formatCurrencyValue(topWeekdayEntry[1]) }
+                    : null,
+                highestCategory: highestCategory
+                    ? {
+                        label: highestCategory.label,
+                        amount: highestCategory.amount,
+                        percentage: highestCategory.percentage,
+                    }
+                    : null,
+                topAccount: topAccount
+                    ? {
+                        label: topAccount.label,
+                        amount: topAccount.amount,
+                        percentage: topAccount.percentage,
+                    }
+                    : null,
+            },
+        };
+
+        setStatsToCache(cacheKey, responseData);
+        return res.status(200).json(responseData);
+    } catch (error) {
+        console.error("Error calculating analytics:", error);
+        return res.status(500).json({ message: "Server error calculating analytics" });
     }
 };
