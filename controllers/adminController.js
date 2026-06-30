@@ -7,6 +7,19 @@ import AccountSource from '../models/accountModel.js'
 import { invalidateStatsCache } from '../utils/statsCache.js'
 import { recalculateAfterBalances } from '../utils/expenseBalance.js'
 
+const getSignedAmount = (expense) => {
+    const normalizedType = expense?.type?.toLowerCase();
+    if (normalizedType === 'debit') return -expense.amount;
+    return expense.amount;
+};
+
+const getManagedUser = async (adminId, userId, session = null) => {
+    if (!mongoose.isValidObjectId(userId)) return null;
+    const query = User.findOne({ _id: userId, admin: adminId });
+    if (session) query.session(session);
+    return query;
+};
+
 export const registerUser = async (req, res) => {
     const { name, email, password } = req.body;
     if (!name || !email || !password) return res.status(403).send("Please enter all details")
@@ -70,7 +83,7 @@ export const deleteUser = async (req, res) => {
 }
 
 export const assignBalance = async (req, res) => {
-    const { amount, date, details } = req.body;
+    const { amount, date, details, clientId } = req.body;
     const userId = req.params.userId;
 
     if (!userId)
@@ -83,20 +96,47 @@ export const assignBalance = async (req, res) => {
     if (isNaN(parsedAmount)) {
         return res.status(400).send("Amount must be a valid number");
     }
+    if (parsedAmount <= 0) {
+        return res.status(400).send("Amount must be greater than zero");
+    }
+    if (typeof details !== 'string' || !details.trim()) {
+        return res.status(400).send("Please provide valid details");
+    }
+    const parsedDate = new Date(date);
+    if (Number.isNaN(parsedDate.getTime())) {
+        return res.status(400).send("Please provide a valid date");
+    }
 
     // Start a transaction (optional but safer for consistency)
     const session = await Expense.startSession();
     session.startTransaction();
 
     try {
+        const managedUser = await getManagedUser(req.userId, userId, session);
+        if (!managedUser) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(403).json({ message: 'You can only assign balance to your own users' });
+        }
+
+        if (clientId) {
+            const existing = await Expense.findOne({ userId, clientId }).session(session);
+            if (existing) {
+                await session.commitTransaction();
+                session.endSession();
+                return res.status(200).send({ id: existing._id });
+            }
+        }
+
         // Save expense
         const expense = new Expense({
             userId,
-            details: details,
+            clientId,
+            details: details.trim(),
             amount: parsedAmount,
             type: 'assign',
             category: 'Added by Admin',
-            date: new Date(date),
+            date: parsedDate,
         });
 
         await expense.save({ session });
@@ -172,9 +212,21 @@ export const removeUserExpense = async (req, res) => {
     try {
         const id = req.params.id
         const userId = req.params.userId
+
+        const managedUser = await getManagedUser(req.userId, userId);
+        if (!managedUser) {
+            return res.status(403).json({ message: 'You can only modify your own users' });
+        }
+
         const expense = await Expense.findById(id)
+        if (!expense || expense.userId.toString() !== userId) {
+            return res.status(404).json({ message: 'Expense not found' });
+        }
+        if (expense.type !== 'assign') {
+            return res.status(403).json({ message: 'Admin can only remove assigned balance entries' });
+        }
         const parsedAmount = expense.amount
-        const signedAmount = -parsedAmount;
+        const signedAmount = -getSignedAmount(expense);
         // Start a transaction (optional but safer for consistency)
         const session = await Expense.startSession();
         session.startTransaction();
@@ -215,20 +267,57 @@ export const edituserExpense = async (req, res) => {
         const id = req.params.id
         const userId = req.params.userId
         const { amount, details, date } = req.body
+
+        const managedUser = await getManagedUser(req.userId, userId);
+        if (!managedUser) {
+            return res.status(403).json({ message: 'You can only modify your own users' });
+        }
+
         const expense = await Expense.findById(id)
+        if (!expense || expense.userId.toString() !== userId) {
+            return res.status(404).json({ message: 'Expense not found' });
+        }
+        if (expense.type !== 'assign') {
+            return res.status(403).json({ message: 'Admin can only edit assigned balance entries' });
+        }
         const session = await Expense.startSession();
         session.startTransaction();
 
         try {
-            if (parseFloat(amount) !== expense.amount) {
-                const signedAmount = parseFloat(amount) - expense.amount
+            const parsedAmount = parseFloat(amount);
+            if (Number.isNaN(parsedAmount) || parsedAmount <= 0) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(400).json({ message: 'Amount must be a valid positive number' });
+            }
+
+            if (!details || !details.trim()) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(400).json({ message: 'Details are required' });
+            }
+
+            const parsedDate = new Date(date);
+            if (Number.isNaN(parsedDate.getTime())) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(400).json({ message: 'Invalid date provided' });
+            }
+
+            if (parsedAmount !== expense.amount) {
+                const multiplier = expense.type === 'debit' ? -1 : 1;
+                const signedAmount = (parsedAmount - expense.amount) * multiplier;
                 await User.findByIdAndUpdate(
                     userId,
                     { $inc: { netBalance: signedAmount } },
                     { session }
                 );
             }
-            await Expense.findByIdAndUpdate(id, { amount, details, date: new Date(date) }, { session });
+            await Expense.findByIdAndUpdate(id, {
+                amount: parsedAmount,
+                details: details.trim(),
+                date: parsedDate
+            }, { session });
             await recalculateAfterBalances(userId, session);
             // Commit transaction
             await session.commitTransaction();
@@ -255,9 +344,9 @@ export const getUserExpenses = async (req, res) => {
         return res.status(400).json({ message: 'User ID is required' });
     }
 
-    const user = await User.findById(userId).select('netBalance name');
+    const user = await User.findOne({ _id: userId, admin: req.userId }).select('netBalance name');
     if (!user) {
-        return res.status(404).json({ message: 'User not found' });
+        return res.status(404).json({ message: 'User not found for this admin' });
     }
 
     const expenses = await Expense.find({ userId })

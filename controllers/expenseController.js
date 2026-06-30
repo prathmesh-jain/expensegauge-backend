@@ -215,6 +215,9 @@ export const removeExpense = async (req, res) => {
         if (!expense) {
             return res.status(404).json({ message: 'Expense not found' });
         }
+        if (expense.userId.toString() !== req.userId) {
+            return res.status(403).json({ message: 'Not authorized to delete this expense' });
+        }
         
         const parsedAmount = expense.amount
         const signedAmount = expense.type === 'debit' ? parsedAmount : -parsedAmount;
@@ -284,6 +287,9 @@ export const editExpense = async (req, res) => {
         // Handle case where expense doesn't exist (was never synced)
         if (!expense) {
             return res.status(404).json({ message: 'Expense not found' });
+        }
+        if (expense.userId.toString() !== req.userId) {
+            return res.status(403).json({ message: 'Not authorized to edit this expense' });
         }
         
         // --- Server-side validation for edited fields ---
