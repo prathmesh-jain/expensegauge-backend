@@ -213,6 +213,12 @@ export const removeUserExpense = async (req, res) => {
         const id = req.params.id
         const userId = req.params.userId
 
+        if (!mongoose.isValidObjectId(id)) {
+            return res.status(404).json({
+                message: 'Expense not found (invalid ID format)'
+            });
+        }
+
         const managedUser = await getManagedUser(req.userId, userId);
         if (!managedUser) {
             return res.status(403).json({ message: 'You can only modify your own users' });
@@ -267,6 +273,12 @@ export const edituserExpense = async (req, res) => {
         const id = req.params.id
         const userId = req.params.userId
         const { amount, details, date } = req.body
+
+        if (!mongoose.isValidObjectId(id)) {
+            return res.status(404).json({
+                message: 'Expense not found (invalid ID format)'
+            });
+        }
 
         const managedUser = await getManagedUser(req.userId, userId);
         if (!managedUser) {
