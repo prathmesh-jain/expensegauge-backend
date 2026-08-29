@@ -242,7 +242,9 @@ export const refresh = async (req, res) => {
 
         // Check if refreshToken exists in DB
         const tokenIndex = user.refreshTokens.findIndex(rt => rt.token === refreshToken);
-        if (tokenIndex === -1) return res.sendStatus(403); // token reuse/invalid
+        if (tokenIndex === -1) return res.status(401).json({
+            message: "Invalid or expired refresh token",
+        }); // token reuse/invalid
 
         // Rotate: remove old, issue new
         user.refreshTokens.splice(tokenIndex, 1); // remove old
@@ -258,12 +260,20 @@ export const refresh = async (req, res) => {
         const newAccessToken = jwt.sign(
             { userId: user._id, role: user.role },
             process.env.ACCESS_SECRET,
-            { expiresIn: '15m' }
+            { expiresIn: '1h' }
         );
 
         res.status(200).json({ accessToken: newAccessToken, refreshToken: newRefreshToken });
     } catch (err) {
-        return res.sendStatus(403); // Token expired/invalid
+        console.error("[AUTH REFRESH ERROR]", {
+            name: err.name,
+            message: err.message,
+            expiredAt: err.expiredAt,
+        });
+
+        return res.status(401).json({
+            message: "Invalid or expired refresh token",
+        });
     }
 }
 

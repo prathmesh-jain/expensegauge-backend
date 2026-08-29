@@ -20,6 +20,18 @@ const app = express()
 app.use(express.json())
 const port = process.env.PORT || 3000
 
+app.use((req, res, next) => {
+    console.log(`[API] ${req.method} ${req.originalUrl}`);
+
+    res.on('finish', () => {
+        console.log(
+            `[API] ${req.method} ${req.originalUrl} → ${res.statusCode}`
+        );
+    });
+
+    next();
+});
+
 app.use(cors({
     origin: '*',
     credentials: true
