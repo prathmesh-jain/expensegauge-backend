@@ -69,6 +69,11 @@ export const deleteUser = async (req, res) => {
     const { userId } = req.params;
 
     try {
+        const managedUser = await getManagedUser(req.userId, userId);
+        if (!managedUser) {
+            return res.status(403).json({ message: 'You can only delete your own users' });
+        }
+
         await Expense.deleteMany({ userId }); // Delete all expenses for the user
         await AccountSource.deleteMany({ userId }); // Delete all accounts for the user
         const deletedUser = await User.findByIdAndDelete(userId); // Then delete the user

@@ -1,9 +1,16 @@
 import Expense from "../models/expenseModel.js";
 import AccountSource from "../models/accountModel.js";
+import User from "../models/userModel.js";
 import { getRangeBounds, getRangeFilter } from "../utils/expenseBalance.js";
 import { getStatsFromCache, setStatsToCache } from "../utils/statsCache.js";
+import mongoose from "mongoose";
 
 const formatCurrencyValue = (value = 0) => Number(value.toFixed(2));
+
+const getManagedUser = async (adminId, userId) => {
+    if (!mongoose.isValidObjectId(userId)) return null;
+    return User.findOne({ _id: userId, admin: adminId });
+};
 
 const buildStatsFilter = async ({ userId, sourceId, range }) => {
     const queryFilter = { userId, ...getRangeFilter(range) };
@@ -29,6 +36,14 @@ export const getMonthlyStats = async (req, res) => {
 
         if (!targetUserId) {
             return res.status(400).json({ message: "User ID is required" });
+        }
+
+        // Verify admin ownership if requesting stats for a different user
+        if (targetUserId.toString() !== req.userId.toString()) {
+            const managedUser = await getManagedUser(req.userId, targetUserId);
+            if (!managedUser) {
+                return res.status(403).json({ message: 'You can only view stats for your own users' });
+            }
         }
 
         // 1. Build cache key with filters (userId-range-sourceId)
@@ -118,13 +133,20 @@ export const getMonthlyStats = async (req, res) => {
 
 export const getExpenseAnalytics = async (req, res) => {
     try {
-        console.log("insisde stats")
         const targetUserId = req.body?.userId || req.query?.userId || req.userId;
         const sourceId = req.query?.sourceId || null;
         const range = req.query?.range || "all_time";
 
         if (!targetUserId) {
             return res.status(400).json({ message: "User ID is required" });
+        }
+
+        // Verify admin ownership if requesting stats for a different user
+        if (targetUserId.toString() !== req.userId.toString()) {
+            const managedUser = await getManagedUser(req.userId, targetUserId);
+            if (!managedUser) {
+                return res.status(403).json({ message: 'You can only view analytics for your own users' });
+            }
         }
 
         const cacheKey = `${targetUserId}-analytics-${range}-${sourceId || "all"}`;
