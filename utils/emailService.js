@@ -12,7 +12,7 @@ export const sendEmail = async ({ to, subject, text, html, attachments }) => {
     const payload = {
         sender: {
             name: 'ExpenseGauge',
-            email: 'pratsspam22@gmail.com', // works without domain verification
+            email: process.env.ADMIN_EMAIL,
         },
         to: [{ email: to }],
         subject,

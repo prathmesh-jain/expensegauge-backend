@@ -10,8 +10,8 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 
 export const signup = async (req, res) => {
-    const { name, email, password, role } = req.body;
-    if (!name || !email || !password || !role) return res.status(403).send("Please enter all details")
+    const { name, email, password } = req.body;
+    if (!name || !email || !password) return res.status(403).send("Please enter all details")
 
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
     if (!passwordRegex.test(password)) {
@@ -26,7 +26,7 @@ export const signup = async (req, res) => {
         name,
         email,
         password: hashedPassword,
-        role
+        role: 'user'
     })
     const accessToken = jwt.sign(
         { userId: newuser._id, role: role },
@@ -98,39 +98,63 @@ export const upgradeToAdmin = async (req, res) => {
             });
         }
 
-        user.role = 'admin';
-
-        const accessToken = jwt.sign(
-            { userId: user._id, role: user.role },
-            process.env.ACCESS_SECRET,
-            { expiresIn: '1h' }
-        );
-
-        const refreshToken = jwt.sign(
-            { userId: user._id },
-            process.env.REFRESH_SECRET,
-            { expiresIn: '30d' }
-        );
-
-        user.refreshTokens.push({ token: refreshToken });
-        if (user.refreshTokens.length > 5) {
-            user.refreshTokens.shift();
+        if (user.adminRequested) {
+            return res.status(403).send({ message: 'Admin access request already submitted. You will be notified once approved.' });
         }
 
+        // Mark the request as submitted
+        user.adminRequested = true;
+        user.adminRequestedAt = new Date();
         await user.save();
 
+        // Send email to application owner
+        await sendEmail({
+            to: process.env.ADMIN_EMAIL,
+            subject: 'Admin Access Request - ExpenseGauge',
+            text: `Admin Access Request
+
+User Details:
+- Name: ${user.name}
+- Email: ${user.email}
+- User ID: ${user._id}
+- Requested At: ${user.adminRequestedAt.toISOString()}
+
+Please review this request and approve or deny admin access for this user.`,
+            html: `
+            <div style="font-family: Arial, sans-serif; background-color: #f7f9fb; padding: 20px;">
+                <div style="max-width: 500px; background: #ffffff; border-radius: 10px; margin: auto; box-shadow: 0 2px 6px rgba(0,0,0,0.1); overflow: hidden;">
+                <div style="background-color: #3a6df0; padding: 20px; text-align: center;">
+                    <img src="https://expensegauge.vercel.app/icon.png" alt="ExpenseGauge Logo" width="80" height="auto" />
+                    <h2 style="color: white; margin: 10px 0 0;">ExpenseGauge</h2>
+                </div>
+                <div style="padding: 25px; color: #333;">
+                    <h3 style="color: #3a6df0;">Admin Access Request</h3>
+                    <p>A user has requested admin access to ExpenseGauge. Here are the details:</p>
+                    
+                    <div style="background: #f0f3fa; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                        <p><strong>Name:</strong> ${user.name}</p>
+                        <p><strong>Email:</strong> ${user.email}</p>
+                        <p><strong>User ID:</strong> ${user._id}</p>
+                        <p><strong>Requested At:</strong> ${user.adminRequestedAt.toISOString()}</p>
+                    </div>
+                    
+                    <p>Please review this request and approve or deny admin access for this user manually from the backend.</p>
+                    <p style="margin-top: 25px;">Best regards,<br><b>The ExpenseGauge Team</b></p>
+                </div>
+                <div style="background: #f0f3fa; text-align: center; padding: 10px; font-size: 12px; color: #777;">
+                    © ${new Date().getFullYear()} ExpenseGauge. All rights reserved.
+                </div>
+                </div>
+            </div>
+            `
+        });
+
         return res.status(200).send({
-            message: 'Upgraded to admin',
-            accessToken,
-            refreshToken,
-            name: user.name,
-            email: user.email,
-            role: user.role,
-            profilePicture: user.profilePicture,
+            message: 'Admin access request submitted successfully. If eligible, you will be granted access within 24-48 hours.',
         });
     } catch (error) {
         console.error(error);
-        return res.status(500).send({ message: 'Failed to upgrade to admin' });
+        return res.status(500).send({ message: 'Failed to submit admin access request' });
     }
 }
 
@@ -150,8 +174,6 @@ export const googleAuth = async (req, res) => {
         const payload = ticket.getPayload();
         const email = payload.email;
         const name = payload.name;
-        // Check for role in request body, default to "user"
-        const requestedRole = req.body.role || "user";
 
         // Find or Create user
         let user = await User.findOne({ email });
@@ -164,7 +186,7 @@ export const googleAuth = async (req, res) => {
                 name,
                 email,
                 password: hashedPassword, // required by schema
-                role: requestedRole,
+                role: 'user',
                 provider: "google",
                 profilePicture: payload.picture // Saving Google Avatar
             });
@@ -310,7 +332,7 @@ export const requestPasswordResetOTP = async (req, res) => {
             <div style="font-family: Arial, sans-serif; background-color: #f7f9fb; padding: 20px;">
                 <div style="max-width: 500px; background: #ffffff; border-radius: 10px; margin: auto; box-shadow: 0 2px 6px rgba(0,0,0,0.1); overflow: hidden;">
                 <div style="background-color: #3a6df0; padding: 20px; text-align: center;">
-                    <img src="https://expensegauge.vercel.app/icon2.png" alt="ExpenseGauge Logo" width="80" height="auto" />
+                    <img src="https://expensegauge.vercel.app/icon.png" alt="ExpenseGauge Logo" width="80" height="auto" />
                     <h2 style="color: white; margin: 10px 0 0;">ExpenseGauge</h2>
                 </div>
                 <div style="padding: 25px; color: #333;">

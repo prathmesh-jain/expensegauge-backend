@@ -37,6 +37,11 @@ const userSchema = new mongoose.Schema({
     refreshTokens: [{ token: String }],
     otp: String,
     otpExpires: Date,
+    adminRequested: {
+        type: Boolean,
+        default: false
+    },
+    adminRequestedAt: Date,
 }, { timestamps: true })
 
 export default mongoose.model("users", userSchema)
