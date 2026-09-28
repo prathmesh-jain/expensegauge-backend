@@ -476,3 +476,164 @@ export const getExpenses = async (req, res) => {
         hasMore,
     });
 }
+
+export const batchAddExpenses = async (req, res) => {
+    try {
+        const { expenses } = req.body;
+        const userId = req.userId;
+
+        if (!Array.isArray(expenses) || expenses.length === 0) {
+            return res.status(400).json({ message: 'Expenses array is required' });
+        }
+
+        if (expenses.length > 500) {
+            return res.status(400).json({ message: 'Maximum 500 expenses per batch' });
+        }
+
+        const session = await Expense.startSession();
+        session.startTransaction();
+
+        try {
+            const results = {
+                success: 0,
+                failed: 0,
+                errors: [],
+                expenseMapping: {} // Maps clientId to remote MongoDB ID
+            };
+
+            // First, resolve all sourceIds
+            const sourceIdMap = new Map();
+            const uniqueSourceIds = [...new Set(expenses.map(e => e.sourceId).filter(Boolean))];
+
+            for (const sourceId of uniqueSourceIds) {
+                try {
+                    const resolvedId = await resolveAndValidateSourceId(userId, sourceId, session);
+                    sourceIdMap.set(sourceId, resolvedId);
+                } catch (error) {
+                    console.error(`Failed to resolve sourceId ${sourceId}:`, error);
+                    // Will handle per-expense below
+                }
+            }
+
+            // Process each expense
+            for (let i = 0; i < expenses.length; i++) {
+                const expenseData = expenses[i];
+                
+                try {
+                    // Validate required fields
+                    if (!expenseData.details || !expenseData.amount || !expenseData.type || !expenseData.date) {
+                        throw new Error('Missing required fields');
+                    }
+
+                    const parsedAmount = parseFloat(expenseData.amount);
+                    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+                        throw new Error('Invalid amount');
+                    }
+
+                    const parsedDate = new Date(expenseData.date);
+                    if (isNaN(parsedDate.getTime())) {
+                        throw new Error('Invalid date');
+                    }
+
+                    // Resolve sourceId
+                    let finalSourceId = null;
+                    if (expenseData.sourceId) {
+                        if (sourceIdMap.has(expenseData.sourceId)) {
+                            finalSourceId = sourceIdMap.get(expenseData.sourceId);
+                        } else {
+                            // Try to resolve on the fly
+                            finalSourceId = await resolveAndValidateSourceId(userId, expenseData.sourceId, session);
+                            sourceIdMap.set(expenseData.sourceId, finalSourceId);
+                        }
+                    } else {
+                        finalSourceId = await resolveAndValidateSourceId(userId, null, session);
+                    }
+
+                    // Create expense with clientId support for duplicate prevention
+                    const expense = new Expense({
+                        userId,
+                        details: expenseData.details.trim(),
+                        amount: parsedAmount,
+                        type: expenseData.type,
+                        category: expenseData.category || 'Other',
+                        date: parsedDate,
+                        sourceId: finalSourceId,
+                        clientId: expenseData.clientId || expenseData._id // Support both clientId and _id
+                    });
+
+                    await expense.save({ session });
+
+                    // Store mapping from clientId to remote ID
+                    const clientId = expenseData.clientId || expenseData._id;
+                    if (clientId) {
+                        results.expenseMapping[clientId] = expense._id.toString();
+                    }
+
+                    // Update user balance
+                    const signedAmount = expenseData.type === 'debit' ? -parsedAmount : parsedAmount;
+                    await User.findByIdAndUpdate(
+                        userId,
+                        { $inc: { netBalance: signedAmount } },
+                        { session }
+                    );
+
+                    // Update account balance if sourceId exists
+                    if (finalSourceId) {
+                        await AccountSource.findByIdAndUpdate(
+                            finalSourceId,
+                            { $inc: { currentBalance: signedAmount } },
+                            { session }
+                        );
+                        await incrementAccountStats(finalSourceId, parsedDate, session);
+                    }
+
+                    results.success++;
+                } catch (error) {
+                    // Check if it's a duplicate clientId error
+                    if (error.code === 11000 && error.message?.includes('clientId')) {
+                        // Already synced, mark as success but don't count
+                        console.log(`Expense at index ${i} already synced (duplicate clientId)`);
+                        results.success++;
+                    } else {
+                        console.error(`Failed to add expense at index ${i}:`, error);
+                        results.failed++;
+                        results.errors.push({
+                            index: i,
+                            clientId: expenseData.clientId || expenseData._id,
+                            error: error.message || 'Unknown error',
+                            details: expenseData
+                        });
+                    }
+                }
+            }
+
+            // Recalculate afterBalances for the user
+            await recalculateAfterBalances(userId, session);
+
+            await session.commitTransaction();
+            session.endSession();
+
+            invalidateStatsCache(userId);
+
+            return res.status(200).json({
+                message: 'Batch processing completed',
+                results: {
+                    total: expenses.length,
+                    success: results.success,
+                    failed: results.failed,
+                    errors: results.errors,
+                    expenseMapping: results.expenseMapping
+                }
+            });
+
+        } catch (error) {
+            await session.abortTransaction();
+            session.endSession();
+            console.error('Batch add expenses error:', error);
+            return res.status(500).json({ message: 'Batch processing failed', error: error.message });
+        }
+    } catch (error) {
+        console.error('Batch add expenses error:', error);
+        return res.status(500).json({ message: 'Server error' });
+    }
+}

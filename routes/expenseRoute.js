@@ -1,11 +1,12 @@
 import express from 'express'
-import { addExpense, editExpense, getExpenses, removeExpense } from '../controllers/expenseController.js'
+import { addExpense, editExpense, getExpenses, removeExpense, batchAddExpenses } from '../controllers/expenseController.js'
 import { generateReport } from '../controllers/reportController.js'
 import { getExpenseAnalytics, getMonthlyStats } from '../controllers/statsController.js'
 
 const router = express.Router()
 
 router.post('/add', addExpense)
+router.post('/batch-add', batchAddExpenses)
 router.get('/get-expense/', getExpenses)
 router.get('/stats/monthly', getMonthlyStats)
 router.get('/stats/analytics', getExpenseAnalytics)

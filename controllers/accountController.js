@@ -245,4 +245,92 @@ export const deleteAccount = async (req, res) => {
     console.error(error);
     return res.status(500).json({ message: 'Failed to delete account' });
   }
+}
+
+export const batchAddAccounts = async (req, res) => {
+    try {
+        const { accounts } = req.body;
+        const userId = req.userId;
+
+        if (!Array.isArray(accounts) || accounts.length === 0) {
+            return res.status(400).json({ message: 'Accounts array is required' });
+        }
+
+        if (accounts.length > 100) {
+            return res.status(400).json({ message: 'Maximum 100 accounts per batch' });
+        }
+
+        const results = {
+            success: 0,
+            failed: 0,
+            errors: [],
+            accountMapping: {}
+        };
+
+        for (let i = 0; i < accounts.length; i++) {
+            const accountData = accounts[i];
+            const localId = accountData.localId || `local_${i}`;
+
+            try {
+                // Validate required fields
+                if (!accountData.name || !accountData.type) {
+                    throw new Error('Missing required fields');
+                }
+
+                // Normalize the account name
+                const normalizedName = normalizeName(accountData.name);
+
+                // Check if account already exists for this user
+                let account = await AccountSource.findOne({
+                    userId,
+                    normalizedName
+                });
+
+                if (!account) {
+                    // Create new account
+                    account = new AccountSource({
+                        userId,
+                        name: accountData.name.trim(),
+                        normalizedName,
+                        type: accountData.type,
+                        openingBalance: accountData.balance || 0,
+                        currentBalance: accountData.balance || 0,
+                        isDefault: false,
+                        isSystem: false,
+                        transactionCount: 0,
+                        lastUsed: null
+                    });
+
+                    await account.save();
+                }
+
+                // Map localId to remote MongoDB ID
+                results.accountMapping[localId] = account._id.toString();
+                results.success++;
+            } catch (error) {
+                console.error(`Failed to add account at index ${i}:`, error);
+                results.failed++;
+                results.errors.push({
+                    index: i,
+                    localId: accountData.localId || `local_${i}`,
+                    error: error.message || 'Unknown error',
+                    details: accountData
+                });
+            }
+        }
+
+        return res.status(200).json({
+            message: 'Batch account processing completed',
+            results: {
+                total: accounts.length,
+                success: results.success,
+                failed: results.failed,
+                errors: results.errors,
+                accountMapping: results.accountMapping
+            }
+        });
+    } catch (error) {
+        console.error('Batch add accounts error:', error);
+        return res.status(500).json({ message: 'Server error' });
+    }
 };
