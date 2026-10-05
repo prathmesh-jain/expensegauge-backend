@@ -84,6 +84,12 @@ const decrementAccountStats = async (sourceId, session = null) => {
 
 export const addExpense = async (req, res) => {
     try {
+        // Verify user exists
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found. Account may have been deleted.' });
+        }
+
         const { details, amount, type, category, date, clientId, sourceId } = req.body
 
         if (!details || !amount || !type || !date) {
@@ -200,12 +206,18 @@ export const addExpense = async (req, res) => {
 
 export const removeExpense = async (req, res) => {
     try {
+        // Verify user exists
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found. Account may have been deleted.' });
+        }
+
         const id = req.params.id
-        
+
         // Validate ObjectId format (handles temp IDs from offline sync)
         if (!mongoose.isValidObjectId(id)) {
-            return res.status(404).json({ 
-                message: 'Expense not found (invalid ID format)' 
+            return res.status(404).json({
+                message: 'Expense not found (invalid ID format)'
             });
         }
         
@@ -272,13 +284,19 @@ export const removeExpense = async (req, res) => {
 
 export const editExpense = async (req, res) => {
     try {
+        // Verify user exists
+        const user = await User.findById(req.userId);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found. Account may have been deleted.' });
+        }
+
         const id = req.params.id
         const { amount, details, category, date, sourceId } = req.body
-        
+
         // Validate ObjectId format (handles temp IDs from offline sync)
         if (!mongoose.isValidObjectId(id)) {
-            return res.status(404).json({ 
-                message: 'Expense not found (invalid ID format)' 
+            return res.status(404).json({
+                message: 'Expense not found (invalid ID format)'
             });
         }
         
