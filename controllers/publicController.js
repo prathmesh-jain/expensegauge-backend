@@ -2,23 +2,11 @@ import crypto from 'crypto';
 import User from '../models/userModel.js';
 import Expense from '../models/expenseModel.js';
 import AccountSource from '../models/accountModel.js';
+import DeletionToken from '../models/deletionTokenModel.js';
 import { sendEmail } from '../utils/emailService.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
-
-// Store deletion tokens (in production, use Redis or database)
-const deletionTokens = new Map();
-
-// Clean up expired tokens periodically
-setInterval(() => {
-    const now = Date.now();
-    for (const [token, data] of deletionTokens.entries()) {
-        if (data.expiresAt < now) {
-            deletionTokens.delete(token);
-        }
-    }
-}, 60 * 60 * 1000); // Every hour
 
 export const requestAccountDeletion = async (req, res) => {
     try {
@@ -37,9 +25,11 @@ export const requestAccountDeletion = async (req, res) => {
 
         // Generate secure token
         const token = crypto.randomBytes(32).toString('hex');
-        const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+        const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
-        deletionTokens.set(token, {
+        // Store token in MongoDB
+        await DeletionToken.create({
+            token,
             userId: user._id,
             email: user.email,
             expiresAt,
@@ -74,21 +64,21 @@ The ExpenseGauge Team`,
                 <div style="padding: 25px; color: #333;">
                     <h3 style="color: #dc3545;">Account Deletion Request</h3>
                     <p>We received a request to delete your ExpenseGauge account associated with <strong>${user.email}</strong>.</p>
-                    
+
                     <p style="margin: 20px 0;">To confirm the deletion of your account and all associated data, click the button below:</p>
-                    
+
                     <div style="text-align: center; margin: 25px 0;">
                         <a href="${deletionLink}" style="background-color: #dc3545; color: white; padding: 12px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; display: inline-block;">Delete My Account</a>
                     </div>
-                    
+
                     <p style="font-size: 13px; color: #666;">This link will expire in 24 hours.</p>
-                    
+
                     <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0;">
                         <p style="margin: 0; font-size: 13px; color: #856404;">
                             <strong>Warning:</strong> This action cannot be undone. All your data including expenses, accounts, and personal information will be permanently deleted.
                         </p>
                     </div>
-                    
+
                     <p style="margin-top: 25px;">If you did not request this deletion, please ignore this email. Your account will not be deleted.</p>
                     <p style="margin-top: 25px;">Best regards,<br><b>The ExpenseGauge Team</b></p>
                 </div>
@@ -115,9 +105,9 @@ export const verifyDeletionToken = async (req, res) => {
             return res.status(400).json({ message: 'Token is required' });
         }
 
-        const tokenData = deletionTokens.get(token);
+        const tokenData = await DeletionToken.findOne({ token });
 
-        if (!tokenData || tokenData.expiresAt < Date.now()) {
+        if (!tokenData || tokenData.expiresAt < new Date()) {
             return res.status(400).json({ message: 'Invalid or expired token' });
         }
 
@@ -135,7 +125,7 @@ export const verifyDeletionToken = async (req, res) => {
         }
 
         res.status(200).json({
-            email: user.email,
+            email: tokenData.email,
             role: user.role,
             hasManagedUsers
         });
@@ -153,9 +143,9 @@ export const confirmAccountDeletion = async (req, res) => {
             return res.status(400).json({ message: 'Token is required' });
         }
 
-        const tokenData = deletionTokens.get(token);
+        const tokenData = await DeletionToken.findOne({ token });
 
-        if (!tokenData || tokenData.expiresAt < Date.now()) {
+        if (!tokenData || tokenData.expiresAt < new Date()) {
             return res.status(400).json({ message: 'Invalid or expired token' });
         }
 
@@ -184,8 +174,8 @@ export const confirmAccountDeletion = async (req, res) => {
         // Delete the user
         await User.findByIdAndDelete(userId);
 
-        // Remove the token
-        deletionTokens.delete(token);
+        // Remove the token from database
+        await DeletionToken.deleteOne({ token });
 
         res.status(200).json({ message: 'Account deleted successfully' });
     } catch (error) {
