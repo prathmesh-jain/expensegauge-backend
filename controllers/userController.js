@@ -29,12 +29,12 @@ export const signup = async (req, res) => {
         role: 'user'
     })
     const accessToken = jwt.sign(
-        { userId: newuser._id, role: role },
+        { userId: newuser._id, role: 'user' },
         process.env.ACCESS_SECRET,
         { "expiresIn": "1Hour" }
     )
     const refreshToken = jwt.sign(
-        { userId: newuser._id },
+        { userId: newuser._id, role: 'user' },
         process.env.REFRESH_SECRET,
         { "expiresIn": "30days" }
     )
@@ -63,7 +63,7 @@ export const login = async (req, res) => {
         { "expiresIn": "1Hour" }
     )
     const refreshToken = jwt.sign(
-        { userId: user._id },
+        { userId: user._id, role: user.role },
         process.env.REFRESH_SECRET,
         { "expiresIn": "30days" }
     )
@@ -443,5 +443,85 @@ export const logout = async (req, res) => {
         res.sendStatus(204);
     } catch (err) {
         res.sendStatus(403);
+    }
+};
+
+export const sendFeedback = async (req, res) => {
+    try {
+        const { message, deviceInfo } = req.body;
+        const userId = req.userId;
+
+        if (!message || !message.trim()) {
+            return res.status(400).json({ message: 'Feedback message is required' });
+        }
+
+        if (message.length > 500) {
+            return res.status(400).json({ message: 'Feedback message must be less than 500 characters' });
+        }
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        // Send email to admin with feedback
+        await sendEmail({
+            to: process.env.ADMIN_EMAIL,
+            subject: 'App Feedback - ExpenseGauge',
+            text: `App Feedback
+
+User Details:
+- Name: ${user.name}
+- Email: ${user.email}
+- User ID: ${user._id}
+- Role: ${user.role}
+
+Device Information:
+${deviceInfo ? JSON.stringify(deviceInfo, null, 2) : 'Not provided'}
+
+Feedback Message:
+${message}`,
+            html: `
+            <div style="font-family: Arial, sans-serif; background-color: #f7f9fb; padding: 20px;">
+                <div style="max-width: 500px; background: #ffffff; border-radius: 10px; margin: auto; box-shadow: 0 2px 6px rgba(0,0,0,0.1); overflow: hidden;">
+                <div style="background-color: #3a6df0; padding: 20px; text-align: center;">
+                    <img src="https://expensegauge.vercel.app/icon.png" alt="ExpenseGauge Logo" width="80" height="auto" />
+                    <h2 style="color: white; margin: 10px 0 0;">ExpenseGauge</h2>
+                </div>
+                <div style="padding: 25px; color: #333;">
+                    <h3 style="color: #3a6df0;">App Feedback</h3>
+                    <p>A user has submitted feedback about the app:</p>
+                    
+                    <div style="background: #f0f3fa; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                        <p><strong>Name:</strong> ${user.name}</p>
+                        <p><strong>Email:</strong> ${user.email}</p>
+                        <p><strong>User ID:</strong> ${user._id}</p>
+                        <p><strong>Role:</strong> ${user.role}</p>
+                    </div>
+
+                    <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                        <p style="margin: 0; font-weight: bold;">Device Information:</p>
+                        <pre style="white-space: pre-wrap; margin: 10px 0 0; font-size: 12px;">${deviceInfo ? JSON.stringify(deviceInfo, null, 2) : 'Not provided'}</pre>
+                    </div>
+
+                    <div style="background: #e7f3ff; padding: 15px; border-radius: 5px; margin: 15px 0;">
+                        <p style="margin: 0; font-weight: bold;">Feedback Message:</p>
+                        <p style="margin: 10px 0 0;">${message}</p>
+                    </div>
+                    
+                    <p style="margin-top: 25px;">Best regards,<br><b>The ExpenseGauge Team</b></p>
+                </div>
+                <div style="background: #f0f3fa; text-align: center; padding: 10px; font-size: 12px; color: #777;">
+                    © ${new Date().getFullYear()} ExpenseGauge. All rights reserved.
+                </div>
+                </div>
+            </div>
+            `
+        });
+
+        res.status(200).json({ message: 'Feedback sent successfully' });
+    } catch (error) {
+        console.error('Send feedback error:', error);
+        res.status(500).json({ message: 'Error sending feedback' });
     }
 };

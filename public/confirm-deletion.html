@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Confirm Account Deletion - ExpenseGauge</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 500px;
+            width: 100%;
+            padding: 40px;
+        }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .logo h1 {
+            color: #667eea;
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .logo p {
+            color: #666;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+
+        .warning-box {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 25px;
+        }
+
+        .warning-box h3 {
+            color: #856404;
+            font-size: 16px;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .warning-box p {
+            color: #856404;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .user-info {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 25px;
+        }
+
+        .user-info p {
+            color: #333;
+            font-size: 14px;
+            margin-bottom: 5px;
+        }
+
+        .user-info p strong {
+            color: #666;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .button {
+            flex: 1;
+            padding: 14px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .button-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .button-danger:hover {
+            background: #c82333;
+        }
+
+        .button-secondary {
+            background: #6c757d;
+            color: white;
+        }
+
+        .button-secondary:hover {
+            background: #5a6268;
+        }
+
+        .button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+
+        .info-text {
+            text-align: center;
+            color: #666;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .success-message {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .success-message h2 {
+            color: #155724;
+            font-size: 20px;
+            margin-bottom: 10px;
+        }
+
+        .success-message p {
+            color: #155724;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+
+        .error-message {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .error-message p {
+            color: #721c24;
+            font-size: 14px;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: white;
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+        }
+
+        .loading .spinner {
+            width: 40px;
+            height: 40px;
+            border-width: 4px;
+            margin: 0 auto 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <h1>ExpenseGauge</h1>
+            <p>Confirm Account Deletion</p>
+        </div>
+
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Verifying deletion request...</p>
+        </div>
+
+        <div id="confirmForm" class="hidden">
+            <div class="warning-box">
+                <h3>⚠️ Final Warning</h3>
+                <p>You are about to permanently delete your ExpenseGauge account and all associated data. This action cannot be undone.</p>
+            </div>
+
+            <div class="user-info">
+                <p><strong>Email:</strong> <span id="userEmail"></span></p>
+                <p><strong>Account Type:</strong> <span id="userRole"></span></p>
+                <p id="adminWarning" class="hidden" style="color: #dc3545; margin-top: 10px; font-weight: 600;">
+                    ⚠️ You are an admin. Deleting your account will also delete all managed users and their data.
+                </p>
+            </div>
+
+            <div id="errorMessage" class="error-message hidden">
+                <p id="errorText"></p>
+            </div>
+
+            <div class="button-group">
+                <button class="button button-secondary" id="cancelBtn">Cancel</button>
+                <button class="button button-danger" id="confirmBtn">Delete Account</button>
+            </div>
+
+            <p class="info-text">
+                By clicking "Delete Account", you confirm that you want to permanently delete your account and all associated data.
+            </p>
+        </div>
+
+        <div id="successMessage" class="success-message hidden">
+            <h2>✓ Account Deleted</h2>
+            <p>Your ExpenseGauge account has been successfully deleted. All your data has been permanently removed from our servers.</p>
+            <p style="margin-top: 15px; font-size: 13px;">Thank you for using ExpenseGauge.</p>
+        </div>
+
+        <div id="expiredMessage" class="error-message hidden">
+            <h2 style="color: #721c24; font-size: 20px; margin-bottom: 10px;">⚠️ Link Expired</h2>
+            <p style="color: #721c24; font-size: 14px; line-height: 1.5;">
+                This deletion link has expired or is invalid. Please request a new account deletion from the app or by visiting the deletion page again.
+            </p>
+        </div>
+    </div>
+
+    <script>
+        const token = new URLSearchParams(window.location.search).get('token');
+        const loading = document.getElementById('loading');
+        const confirmForm = document.getElementById('confirmForm');
+        const successMessage = document.getElementById('successMessage');
+        const expiredMessage = document.getElementById('expiredMessage');
+        const confirmBtn = document.getElementById('confirmBtn');
+        const cancelBtn = document.getElementById('cancelBtn');
+        const errorMessage = document.getElementById('errorMessage');
+        const errorText = document.getElementById('errorText');
+        const userEmail = document.getElementById('userEmail');
+        const userRole = document.getElementById('userRole');
+        const adminWarning = document.getElementById('adminWarning');
+
+        // Verify token on page load
+        async function verifyToken() {
+            try {
+                const response = await fetch('/api/v1/public/verify-deletion-token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ token }),
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    loading.classList.add('hidden');
+                    confirmForm.classList.remove('hidden');
+                    userEmail.textContent = data.email;
+                    userRole.textContent = data.role === 'admin' ? 'Admin Account' : 'User Account';
+
+                    if (data.role === 'admin' && data.hasManagedUsers) {
+                        adminWarning.classList.remove('hidden');
+                    }
+                } else {
+                    loading.classList.add('hidden');
+                    expiredMessage.classList.remove('hidden');
+                }
+            } catch (error) {
+                loading.classList.add('hidden');
+                expiredMessage.classList.remove('hidden');
+            }
+        }
+
+        if (!token) {
+            loading.classList.add('hidden');
+            expiredMessage.classList.remove('hidden');
+        } else {
+            verifyToken();
+        }
+
+        cancelBtn.addEventListener('click', () => {
+            window.location.href = '/delete-account.html';
+        });
+
+        confirmBtn.addEventListener('click', async () => {
+            confirmBtn.disabled = true;
+            confirmBtn.innerHTML = '<span class="spinner"></span> Deleting...';
+            errorMessage.classList.add('hidden');
+
+            try {
+                const response = await fetch('/api/v1/public/confirm-account-deletion', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ token }),
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    confirmForm.classList.add('hidden');
+                    successMessage.classList.remove('hidden');
+                } else {
+                    throw new Error(data.message || 'Failed to delete account');
+                }
+            } catch (error) {
+                errorText.textContent = error.message || 'An error occurred. Please try again.';
+                errorMessage.classList.remove('hidden');
+                confirmBtn.disabled = false;
+                confirmBtn.innerHTML = 'Delete Account';
+            }
+        });
+    </script>
+</body>
+</html>

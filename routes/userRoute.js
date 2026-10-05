@@ -10,7 +10,8 @@ import {
     verifyAccess,
     googleAuth,
     updateProfile,
-    upgradeToAdmin
+    upgradeToAdmin,
+    sendFeedback
 } from '../controllers/userController.js'
 
 const router = express.Router()
@@ -25,5 +26,6 @@ router.post('/upgrade-to-admin', verifyAccess, upgradeToAdmin)
 router.post('/forgotPassword/requestOtp', requestPasswordResetOTP);
 router.post('/forgotPassword/reset', resetPassword);
 router.put('/update-profile', verifyAccess, updateProfile);
+router.post('/send-feedback', verifyAccess, sendFeedback);
 
 export default router
