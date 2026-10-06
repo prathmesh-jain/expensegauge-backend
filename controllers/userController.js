@@ -260,7 +260,9 @@ export const refresh = async (req, res) => {
         const decoded = jwt.verify(refreshToken, process.env.REFRESH_SECRET);
         const user = await User.findById(decoded.userId)
 
-        if (!user) return res.sendStatus(403);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
 
         // Check if refreshToken exists in DB
         const tokenIndex = user.refreshTokens.findIndex(rt => rt.token === refreshToken);
@@ -435,7 +437,9 @@ export const logout = async (req, res) => {
     try {
         const payload = jwt.verify(refreshToken, process.env.REFRESH_SECRET);
         const user = await User.findById(payload.userId);
-        if (!user) return res.sendStatus(403);
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
 
         user.refreshTokens = user.refreshTokens.filter(rt => rt.token !== refreshToken);
         await user.save();
