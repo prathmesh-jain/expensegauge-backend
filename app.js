@@ -8,6 +8,7 @@ import publicRoute from './routes/publicRoute.js'
 import cors from 'cors'
 import { verifyAccess } from './controllers/userController.js'
 import { connectDB } from './config/dbConnection.js'
+import { assertEncryptionKey } from './utils/encryption.js'
 import { verifyAdminAccess } from './controllers/adminController.js'
 import dns from 'dns'
 import path from 'path'
@@ -21,6 +22,7 @@ dns.setServers([
     '1.0.0.1'
 ]);
 
+assertEncryptionKey()
 connectDB()
 const app = express()
 app.use(express.json())

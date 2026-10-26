@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "nodemon app.js",
+    "migrate:encrypt-expenses": "node scripts/encryptExistingExpenses.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",

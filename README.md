@@ -129,8 +129,17 @@ ACCESS_SECRET=
 REFRESH_SECRET=
 GOOGLE_CLIENT_ID=
 BREVO_API_KEY=
+ENCRYPTION_KEY=
 PORT=8000
 ```
+
+`ENCRYPTION_KEY` is a 32-byte base64 key used to encrypt expense details at rest. Generate one with:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+```
+
+Keep it out of source control and back it up: losing the key makes encrypted data unreadable, and every server sharing the database must use the same key.
 
 ---
 
@@ -186,6 +195,19 @@ Monthly statistics and analytical reports are cached per user and invalidated on
 
 Reports are generated completely on the server and emailed to users, avoiding client-side rendering while keeping formatting consistent across devices.
 
+## Encryption at rest
+
+Expense `details` are encrypted with AES-256-GCM before they reach MongoDB (`utils/encryption.js`). The schema setter encrypts and the getter decrypts, so controllers keep working with plaintext. Stored values are prefixed with `enc:v1:` so plaintext and encrypted rows can coexist during migration.
+
+To encrypt expenses created before this was added, deploy the backend first and then run:
+
+```bash
+npm run migrate:encrypt-expenses -- --dry-run
+npm run migrate:encrypt-expenses
+```
+
+The migration is idempotent and safe to run while the app is live.
+
 ## Role-based access
 
 Regular users only access their own data, while admins can manage assigned users and perform administrative operations.
@@ -197,6 +219,7 @@ Regular users only access their own data, while admins can manage assigned users
 | Script | Description |
 |--------|-------------|
 | npm start | Start development server with Nodemon |
+| npm run migrate:encrypt-expenses | Encrypt details of existing expenses (`-- --dry-run` to preview) |
 | npm test | Placeholder |
 
 ---
