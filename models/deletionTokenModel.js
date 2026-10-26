@@ -26,8 +26,7 @@ const deletionTokenSchema = new mongoose.Schema({
   },
 });
 
-// Index for faster lookups
-deletionTokenSchema.index({ token: 1 });
+// Index for faster lookups (token is already indexed via unique: true)
 deletionTokenSchema.index({ userId: 1 });
 
 export default mongoose.model('DeletionToken', deletionTokenSchema);
