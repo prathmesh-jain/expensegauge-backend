@@ -6,6 +6,7 @@ import Expense from '../models/expenseModel.js'
 import AccountSource from '../models/accountModel.js'
 import { invalidateStatsCache } from '../utils/statsCache.js'
 import { recalculateAfterBalances } from '../utils/expenseBalance.js'
+import { AMOUNT_TOO_LARGE_MESSAGE, DETAILS_TOO_LONG_MESSAGE, isAmountTooLarge, isDetailsTooLong } from '../utils/expenseLimits.js'
 
 const getSignedAmount = (expense) => {
     const normalizedType = expense?.type?.toLowerCase();
@@ -104,8 +105,14 @@ export const assignBalance = async (req, res) => {
     if (parsedAmount <= 0) {
         return res.status(400).send("Amount must be greater than zero");
     }
+    if (isAmountTooLarge(parsedAmount)) {
+        return res.status(400).send(AMOUNT_TOO_LARGE_MESSAGE);
+    }
     if (typeof details !== 'string' || !details.trim()) {
         return res.status(400).send("Please provide valid details");
+    }
+    if (isDetailsTooLong(details)) {
+        return res.status(400).send(DETAILS_TOO_LONG_MESSAGE);
     }
     const parsedDate = new Date(date);
     if (Number.isNaN(parsedDate.getTime())) {
@@ -307,11 +314,22 @@ export const edituserExpense = async (req, res) => {
                 session.endSession();
                 return res.status(400).json({ message: 'Amount must be a valid positive number' });
             }
+            // Unchanged values pass so older entries over the limit stay editable
+            if (isAmountTooLarge(parsedAmount) && parsedAmount !== expense.amount) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(400).json({ message: AMOUNT_TOO_LARGE_MESSAGE });
+            }
 
             if (!details || !details.trim()) {
                 await session.abortTransaction();
                 session.endSession();
                 return res.status(400).json({ message: 'Details are required' });
+            }
+            if (isDetailsTooLong(details) && details.trim() !== expense.details) {
+                await session.abortTransaction();
+                session.endSession();
+                return res.status(400).json({ message: DETAILS_TOO_LONG_MESSAGE });
             }
 
             const parsedDate = new Date(date);

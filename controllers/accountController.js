@@ -3,6 +3,7 @@ import Expense from '../models/expenseModel.js';
 import User from '../models/userModel.js';
 import { invalidateStatsCache } from '../utils/statsCache.js';
 import { recalculateAfterBalances } from '../utils/expenseBalance.js';
+import { AMOUNT_TOO_LARGE_MESSAGE, isAmountTooLarge } from '../utils/expenseLimits.js';
 
 const DEFAULT_ACCOUNT_NAME = 'Primary Account';
 
@@ -71,6 +72,8 @@ export const createAccount = async (req, res) => {
     if (existing) return res.status(409).json({ message: 'An account with this name already exists' });
 
     const parsed = parseFloat(openingBalance) || 0;
+    if (isAmountTooLarge(parsed)) return res.status(400).json({ message: AMOUNT_TOO_LARGE_MESSAGE });
+
     const account = new AccountSource({
       userId: req.userId,
       name: trimmedName,

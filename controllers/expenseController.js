@@ -4,6 +4,7 @@ import User from "../models/userModel.js";
 import AccountSource from "../models/accountModel.js";
 import { invalidateStatsCache } from "../utils/statsCache.js";
 import { getRangeFilter, recalculateAfterBalances } from "../utils/expenseBalance.js";
+import { AMOUNT_TOO_LARGE_MESSAGE, DETAILS_TOO_LONG_MESSAGE, isAmountTooLarge, isDetailsTooLong } from "../utils/expenseLimits.js";
 
 const DEFAULT_ACCOUNT_NAME = 'Primary Account';
 
@@ -100,6 +101,9 @@ export const addExpense = async (req, res) => {
             return res.status(400).json({ message: 'Details/description is required and cannot be empty' });
         }
         const trimmedDetails = details.trim();
+        if (isDetailsTooLong(trimmedDetails)) {
+            return res.status(400).json({ message: DETAILS_TOO_LONG_MESSAGE });
+        }
 
         if (!amount && amount !== 0) {
             return res.status(400).json({ message: 'Amount is required' });
@@ -107,6 +111,9 @@ export const addExpense = async (req, res) => {
         const parsedAmount = parseFloat(amount);
         if (isNaN(parsedAmount) || parsedAmount <= 0) {
             return res.status(400).json({ message: 'Amount must be a valid positive number' });
+        }
+        if (isAmountTooLarge(parsedAmount)) {
+            return res.status(400).json({ message: AMOUNT_TOO_LARGE_MESSAGE });
         }
 
         if (!type || !['credit', 'debit'].includes(type.toLowerCase())) {
@@ -315,12 +322,19 @@ export const editExpense = async (req, res) => {
             if (typeof details !== 'string' || !details.trim()) {
                 return res.status(400).json({ message: 'Details cannot be empty' });
             }
+            // Unchanged values pass so older entries over the limit stay editable
+            if (isDetailsTooLong(details) && details.trim() !== expense.details) {
+                return res.status(400).json({ message: DETAILS_TOO_LONG_MESSAGE });
+            }
         }
         
         if (amount !== undefined) {
             const parsedAmount = parseFloat(amount);
             if (isNaN(parsedAmount) || parsedAmount <= 0) {
                 return res.status(400).json({ message: 'Amount must be a valid positive number' });
+            }
+            if (isAmountTooLarge(parsedAmount) && parsedAmount !== expense.amount) {
+                return res.status(400).json({ message: AMOUNT_TOO_LARGE_MESSAGE });
             }
         }
         
