@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.env
+.env.*
+*.pdf
+testPdf.js
+Dockerfile
+docker-compose.yml
+.dockerignore
+README.md
