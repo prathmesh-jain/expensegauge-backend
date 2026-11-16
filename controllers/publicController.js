@@ -3,10 +3,39 @@ import User from '../models/userModel.js';
 import Expense from '../models/expenseModel.js';
 import AccountSource from '../models/accountModel.js';
 import DeletionToken from '../models/deletionTokenModel.js';
+import Group from '../models/groupModel.js';
 import { sendEmail } from '../utils/emailService.js';
+import { anonymizeUserInGroups } from '../utils/groupCleanup.js';
+import { normalizeInviteCode } from '../utils/groupLimits.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
+
+// GET /api/v1/public/invite/:code — used by the invite web page.
+// Only shows what the person needs to decide to join; no member names.
+export const getPublicInvitePreview = async (req, res) => {
+    try {
+        const code = normalizeInviteCode(req.params.code);
+        const group = code ? await Group.findOne({ inviteCode: code }) : null;
+        if (!group) {
+            return res.status(404).json({ message: 'Invite not found' });
+        }
+
+        const creator = group.members.find(
+            (m) => m.status === 'active' && m.userId && String(m.userId) === String(group.createdBy)
+        );
+        const firstName = creator?.name?.trim().split(/\s+/)[0] || null;
+
+        return res.status(200).json({
+            groupName: group.name,
+            memberCount: group.members.filter((m) => m.status !== 'left').length,
+            invitedBy: firstName,
+        });
+    } catch (error) {
+        console.error('Public invite preview error:', error);
+        return res.status(500).json({ message: 'Failed to load invite' });
+    }
+};
 
 export const requestAccountDeletion = async (req, res) => {
     try {
@@ -161,11 +190,15 @@ export const confirmAccountDeletion = async (req, res) => {
             const managedUsers = await User.find({ admin: userId });
 
             for (const managedUser of managedUsers) {
+                await anonymizeUserInGroups(managedUser._id);
                 await Expense.deleteMany({ userId: managedUser._id });
                 await AccountSource.deleteMany({ userId: managedUser._id });
                 await User.findByIdAndDelete(managedUser._id);
             }
         }
+
+        // Keep group history for the other members; this person becomes "Deleted user"
+        await anonymizeUserInGroups(userId);
 
         // Delete user's expenses and accounts
         await Expense.deleteMany({ userId });

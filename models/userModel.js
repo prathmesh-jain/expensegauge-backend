@@ -42,6 +42,13 @@ const userSchema = new mongoose.Schema({
         default: false
     },
     adminRequestedAt: Date,
+    // Expo push tokens, one per device the user is signed in on
+    pushTokens: [{ token: String, updatedAt: Date }],
+    // Account-wide off switch for group pushes. Each group is still opt-in on its own (member.notify).
+    notifyGroups: {
+        type: Boolean,
+        default: true
+    },
 }, { timestamps: true })
 
 export default mongoose.model("users", userSchema)

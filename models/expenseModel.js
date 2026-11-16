@@ -27,7 +27,16 @@ const expenseSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'AccountSource',
     default: null,
-  }
+  },
+  // Set when this entry was created from a shared group expense you paid.
+  // `amount` is the full cash you paid; `ownShare` is your part of it, which
+  // is what Insights counts as your spending.
+  groupId: { type: mongoose.Schema.Types.ObjectId, ref: 'groups', default: undefined },
+  groupExpenseId: { type: mongoose.Schema.Types.ObjectId, ref: 'groupExpenses', default: undefined },
+  ownShare: { type: Number, default: undefined },
+  // Set when this entry records a settle-up payment (category "Settlement",
+  // left out of Insights because it's repaying, not spending or earning)
+  settlementId: { type: mongoose.Schema.Types.ObjectId, ref: 'settlements', default: undefined },
 }, {
   timestamps: true,
   // Apply getters in API responses so clients receive decrypted details.

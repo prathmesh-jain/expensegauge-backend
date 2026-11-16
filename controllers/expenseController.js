@@ -2,6 +2,8 @@ import mongoose from "mongoose";
 import Expense from "../models/expenseModel.js";
 import User from "../models/userModel.js";
 import AccountSource from "../models/accountModel.js";
+import GroupExpense from "../models/groupExpenseModel.js";
+import Settlement from "../models/settlementModel.js";
 import { invalidateStatsCache } from "../utils/statsCache.js";
 import { getRangeFilter, recalculateAfterBalances } from "../utils/expenseBalance.js";
 import { AMOUNT_TOO_LARGE_MESSAGE, DETAILS_TOO_LONG_MESSAGE, isAmountTooLarge, isDetailsTooLong } from "../utils/expenseLimits.js";
@@ -24,7 +26,7 @@ const normalizeName = (name) =>
  * default account instead of rejecting the request (which would cause the
  * sync queue to drop the transaction as a "fatal 400 error").
  */
-const resolveAndValidateSourceId = async (userId, sourceId, session = null) => {
+export const resolveAndValidateSourceId = async (userId, sourceId, session = null) => {
     const opts = session ? { session } : {};
 
     if (sourceId) {
@@ -58,7 +60,7 @@ const resolveAndValidateSourceId = async (userId, sourceId, session = null) => {
 /**
  * Update account stats (transactionCount, lastUsed) after a transaction is created.
  */
-const incrementAccountStats = async (sourceId, date, session = null) => {
+export const incrementAccountStats = async (sourceId, date, session = null) => {
     if (!sourceId) return;
     const opts = session ? { session } : {};
     const update = {
@@ -75,7 +77,7 @@ const incrementAccountStats = async (sourceId, date, session = null) => {
 /**
  * Decrement account transactionCount after a transaction is deleted.
  */
-const decrementAccountStats = async (sourceId, session = null) => {
+export const decrementAccountStats = async (sourceId, session = null) => {
     if (!sourceId) return;
     const opts = session ? { session } : {};
     await AccountSource.findByIdAndUpdate(sourceId, {
@@ -246,6 +248,22 @@ export const removeExpense = async (req, res) => {
         try {
 
             await Expense.findByIdAndDelete(id, { session })
+
+            // The shared expense stays in the group; it's just no longer in your personal list
+            if (expense.groupExpenseId) {
+                await GroupExpense.updateOne(
+                    { _id: expense.groupExpenseId, personalExpenseId: expense._id },
+                    { $set: { personalExpenseId: null } },
+                    { session }
+                );
+            }
+            if (expense.settlementId) {
+                await Settlement.updateOne(
+                    { _id: expense.settlementId, personalExpenseId: expense._id },
+                    { $set: { personalExpenseId: null } },
+                    { session }
+                );
+            }
 
             await User.findByIdAndUpdate(
                 req.userId,

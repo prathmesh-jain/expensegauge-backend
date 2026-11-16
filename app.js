@@ -5,6 +5,8 @@ import adminRoute from './routes/adminRoute.js'
 import updateRoute from './routes/updateRoutes.js'
 import accountRoute from './routes/accountRoute.js'
 import publicRoute from './routes/publicRoute.js'
+import groupRoute from './routes/groupRoute.js'
+import notificationRoute from './routes/notificationRoute.js'
 import cors from 'cors'
 import { verifyAccess } from './controllers/userController.js'
 import { connectDB } from './config/dbConnection.js'
@@ -55,6 +57,8 @@ app.use('/api/v1/update', updateRoute)
 app.use('/api/v1/user', userRoute)
 app.use('/api/v1/expense', verifyAccess, expenseRoute)
 app.use('/api/v1/account', verifyAccess, accountRoute)
+app.use('/api/v1/group', verifyAccess, groupRoute)
+app.use('/api/v1/notifications', verifyAccess, notificationRoute)
 app.use('/api/v1/admin', verifyAdminAccess, adminRoute)
 app.use('/api/v1/public', publicRoute)
 app.listen(port, "0.0.0.0", () => {

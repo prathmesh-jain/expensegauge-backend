@@ -7,6 +7,12 @@ import mongoose from "mongoose";
 
 const formatCurrencyValue = (value = 0) => Number(value.toFixed(2));
 
+// A shared expense you paid is stored with the full amount; only your share is your spending
+const spendOf = (expense) => (typeof expense.ownShare === "number" ? expense.ownShare : expense.amount);
+
+// Paying back or getting paid back by friends is neither spending nor income
+const isSettlement = (expense) => expense.category === "Settlement" || !!expense.settlementId;
+
 const getManagedUser = async (adminId, userId) => {
     if (!mongoose.isValidObjectId(userId)) return null;
     return User.findOne({ _id: userId, admin: adminId });
@@ -63,7 +69,8 @@ export const getMonthlyStats = async (req, res) => {
         });
 
         // 4. Fetch Expenses
-        const expenses = await Expense.find(queryFilter).select("amount type date");
+        const expenses = (await Expense.find(queryFilter).select("amount type date ownShare category settlementId"))
+            .filter((expense) => !isSettlement(expense));
 
         // 3. Process Data
         const last12Months = [];
@@ -99,7 +106,7 @@ export const getMonthlyStats = async (req, res) => {
                 if (type === 'credit' || type === 'assign') {
                     match.credit += exp.amount;
                 } else if (type === 'debit') {
-                    match.debit += exp.amount;
+                    match.debit += spendOf(exp);
                 }
             }
         });
@@ -162,11 +169,12 @@ export const getExpenseAnalytics = async (req, res) => {
         });
 
         const expenses = await Expense.find(queryFilter)
-            .select("amount type date category sourceId details")
+            .select("amount type date category sourceId details ownShare settlementId")
             .sort({ date: -1, createdAt: -1 });
 
-        const debitExpenses = expenses.filter((expense) => expense.type?.toLowerCase() === "debit");
-        const totalSpend = debitExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+        // Paying entirely for others (your share is 0) isn't your spending
+        const debitExpenses = expenses.filter((expense) => expense.type?.toLowerCase() === "debit" && spendOf(expense) > 0 && !isSettlement(expense));
+        const totalSpend = debitExpenses.reduce((sum, expense) => sum + spendOf(expense), 0);
         const totalTransactions = debitExpenses.length;
 
         const categoryTotals = {};
@@ -184,16 +192,17 @@ export const getExpenseAnalytics = async (req, res) => {
 
         debitExpenses.forEach((expense) => {
             const categoryName = expense.category || "Other";
-            categoryTotals[categoryName] = (categoryTotals[categoryName] || 0) + expense.amount;
+            const spend = spendOf(expense);
+            categoryTotals[categoryName] = (categoryTotals[categoryName] || 0) + spend;
 
             const accountKey = expense.sourceId?.toString() || "unknown";
-            accountTotals[accountKey] = (accountTotals[accountKey] || 0) + expense.amount;
+            accountTotals[accountKey] = (accountTotals[accountKey] || 0) + spend;
 
             const expenseDate = new Date(expense.date);
             if (!Number.isNaN(expenseDate.getTime())) {
                 activeDates.add(expenseDate.toISOString().slice(0, 10));
                 const weekday = expenseDate.toLocaleDateString("en-US", { weekday: "long" });
-                weekdayTotals[weekday] = (weekdayTotals[weekday] || 0) + expense.amount;
+                weekdayTotals[weekday] = (weekdayTotals[weekday] || 0) + spend;
             }
         });
 
@@ -224,7 +233,7 @@ export const getExpenseAnalytics = async (req, res) => {
         );
 
         const largestExpense = debitExpenses.reduce((largest, expense) => (
-            !largest || expense.amount > largest.amount ? expense : largest
+            !largest || spendOf(expense) > spendOf(largest) ? expense : largest
         ), null);
 
         const highestCategory = categoryBreakdown[0] || null;
@@ -253,7 +262,7 @@ export const getExpenseAnalytics = async (req, res) => {
             insights: {
                 largestExpense: largestExpense
                     ? {
-                        amount: formatCurrencyValue(largestExpense.amount),
+                        amount: formatCurrencyValue(spendOf(largestExpense)),
                         details: largestExpense.details,
                         category: largestExpense.category || "Other",
                         date: largestExpense.date,
