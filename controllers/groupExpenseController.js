@@ -53,7 +53,46 @@ export const serializeGroupExpense = (expense, me) => {
     addedToPersonal: isMine && !!expense.personalExpenseId,
     myShare,
     myPaid,
+    edits: (expense.edits || []).map((edit) => ({
+      at: edit.at,
+      byMemberId: edit.byMemberId,
+      changes: edit.changes.map((c) => ({
+        field: c.field,
+        memberId: c.memberId ?? null,
+        from: c.from ?? null,
+        to: c.to ?? null,
+      })),
+    })),
   };
+};
+
+const MAX_EDITS_KEPT = 30;
+const money = (amount) => fromPaise(toPaise(amount)).toFixed(2);
+const day = (date) => new Date(date).toISOString().slice(0, 10);
+
+/** What an edit changes, as readable before/after values. Empty when nothing changed. */
+const describeChanges = (expense, input) => {
+  const changes = [];
+  const add = (field, from, to, memberId) => changes.push({ field, from: String(from), to: String(to), ...(memberId ? { memberId } : {}) });
+
+  if (expense.details !== input.details) add('details', expense.details, input.details);
+  if (toPaise(expense.amount) !== toPaise(input.amount)) add('amount', money(expense.amount), money(input.amount));
+  if (day(expense.date) !== day(input.date)) add('date', day(expense.date), day(input.date));
+  if ((expense.category || 'Other') !== input.category) add('category', expense.category || 'Other', input.category);
+  const oldPayer = String(expense.paidBy[0]?.memberId);
+  const newPayer = String(input.paidBy[0].memberId);
+  if (oldPayer !== newPayer) add('paidBy', oldPayer, newPayer);
+  if (expense.splitType !== input.splitType) add('splitType', expense.splitType, input.splitType);
+
+  // Each person whose share went up, down, in or out ("0.00" when not on it)
+  const before = new Map(expense.splits.map((s) => [String(s.memberId), toPaise(s.amount)]));
+  const after = new Map(input.splits.map((s) => [String(s.memberId), toPaise(s.amount)]));
+  for (const memberId of new Set([...before.keys(), ...after.keys()])) {
+    const from = before.get(memberId) ?? 0;
+    const to = after.get(memberId) ?? 0;
+    if (from !== to) add('share', fromPaise(from).toFixed(2), fromPaise(to).toFixed(2), memberId);
+  }
+  return changes;
 };
 
 /**
@@ -299,6 +338,7 @@ export const updateGroupExpense = async (req, res) => {
     // People taken off the expense should hear about it too
     const involvedBefore = [...expense.paidBy, ...expense.splits].map((p) => p.memberId);
     const input = parseExpenseInput(req.body, group, expense);
+    const changes = describeChanges(expense, input);
     const iPaid = sameId(input.paidBy[0].memberId, me._id);
     const wantsPersonal = typeof req.body.addToPersonal === 'boolean'
       ? req.body.addToPersonal
@@ -308,6 +348,9 @@ export const updateGroupExpense = async (req, res) => {
 
     await withTransaction(async (session) => {
       Object.assign(expense, input);
+      if (changes.length) {
+        expense.edits = [...expense.edits, { at: new Date(), byMemberId: me._id, changes }].slice(-MAX_EDITS_KEPT);
+      }
       const personalFields = {
         details: personalDetails(input.details, group.name),
         amount: input.amount,
@@ -336,11 +379,12 @@ export const updateGroupExpense = async (req, res) => {
 
       if (touchesPersonal) await recalculateAfterBalances(req.userId, session);
       await expense.save({ session });
-      await Group.updateOne({ _id: group._id }, { $set: { lastActivityAt: new Date(), lastActivityBy: findMyMember(group, req.userId)?._id ?? null } }, { session });
+      // Saving without changes shouldn't show up as new activity for others
+      if (changes.length) await Group.updateOne({ _id: group._id }, { $set: { lastActivityAt: new Date(), lastActivityBy: findMyMember(group, req.userId)?._id ?? null } }, { session });
     });
 
     if (touchesPersonal) invalidateStatsCache(req.userId);
-    void notifyExpense(group, expense, me, 'edited', involvedBefore);
+    if (changes.length) void notifyExpense(group, expense, me, 'edited', involvedBefore);
     return res.status(200).json({
       expense: serializeGroupExpense(expense, me),
       group: await serializeGroupWithBalances(group, req.userId),

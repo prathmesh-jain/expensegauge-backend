@@ -30,7 +30,6 @@ const recipients = (group, memberIds, actorMemberId) => {
     && !sameId(m._id, actorMemberId));
 };
 
-const memberNameOf = (group, memberId) => group.members.find((m) => sameId(m._id, memberId))?.name ?? 'Someone';
 
 const activityData = (group, extra) => ({ type: GROUP_ACTIVITY, groupId: String(group._id), ...extra });
 
@@ -66,33 +65,24 @@ export const notifyExpense = (group, expense, actor, kind, alsoNotify = []) => {
   }));
 };
 
-/** kind: 'recorded' | 'deleted'. Only the payer and receiver are told. */
+/**
+ * kind: 'recorded' | 'deleted'. Payments are recorded by the payer or the
+ * receiver, so the only person to tell is the other one.
+ */
 export const notifySettlement = (group, settlement, actor, kind) => {
   const amount = money(settlement.amount, group.currencySymbol);
-  const fromName = firstName(memberNameOf(group, settlement.fromMemberId));
-  const toName = firstName(memberNameOf(group, settlement.toMemberId));
   const who = firstName(actor.name);
-  const actorIsPayer = sameId(actor._id, settlement.fromMemberId);
-  const actorIsReceiver = sameId(actor._id, settlement.toMemberId);
 
   return sendPushToUsers(
     recipients(group, [settlement.fromMemberId, settlement.toMemberId], actor._id).map((member) => {
       const isReceiver = sameId(member._id, settlement.toMemberId);
       let body;
       if (kind === 'deleted') {
-        if (isReceiver) {
-          body = actorIsPayer
-            ? `${who} deleted their payment of ${amount} to you`
-            : `${who} deleted ${fromName}'s payment of ${amount} to you`;
-        } else {
-          body = actorIsReceiver
-            ? `${who} deleted your payment of ${amount} to them`
-            : `${who} deleted your payment of ${amount} to ${toName}`;
-        }
-      } else if (isReceiver) {
-        body = actorIsPayer ? `${fromName} paid you ${amount}` : `${who} recorded that ${fromName} paid you ${amount}`;
+        body = isReceiver
+          ? `${who} deleted their payment of ${amount} to you`
+          : `${who} deleted your payment of ${amount} to them`;
       } else {
-        body = `${who} recorded your payment of ${amount} to ${toName}`;
+        body = isReceiver ? `${who} paid you ${amount}` : `${who} recorded your payment of ${amount} to them`;
       }
       return {
         userId: member.userId,

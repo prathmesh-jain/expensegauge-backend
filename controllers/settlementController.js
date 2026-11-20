@@ -107,6 +107,10 @@ const parseSettlementInput = (body, group, nets, me) => {
   const to = usable(body.toMemberId);
   if (!from || !to) throw new InputError('Choose who paid and who received from the group');
   if (sameId(from._id, to._id)) throw new InputError('Payer and receiver must be different people');
+  // A payment between two other people is theirs to record
+  if (!sameId(from._id, me._id) && !sameId(to._id, me._id)) {
+    throw new InputError('You can only record payments you made or received');
+  }
 
   const amount = Number(body.amount);
   if (!Number.isFinite(amount) || amount <= 0) throw new InputError('Amount must be a valid positive number');
