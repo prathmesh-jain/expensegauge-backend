@@ -284,6 +284,66 @@ export const deleteSettlement = async (req, res) => {
   }
 };
 
+// GET /api/v1/group/:id/summary — totals for the Summary screen, worked out over
+// everything in the group (the app only holds the pages it has loaded)
+export const getGroupSummary = async (req, res) => {
+  try {
+    const group = await loadMemberGroup(req, res);
+    if (!group) return;
+    const ledger = (await loadLedgers([group._id])).get(String(group._id));
+    const plan = buildSettlePlan(group, ledger);
+
+    // Per member, in paise: paid for expenses, their share, settle-up cash sent and received
+    const totals = new Map();
+    const bump = (memberId, field, paise) => {
+      const key = String(memberId);
+      if (!totals.has(key)) totals.set(key, { paid: 0, share: 0, sent: 0, received: 0 });
+      totals.get(key)[field] += paise;
+    };
+    let totalSpentPaise = 0;
+    for (const expense of ledger.expenses) {
+      totalSpentPaise += toPaise(expense.amount);
+      for (const p of expense.paidBy) bump(p.memberId, 'paid', toPaise(p.amount));
+      for (const s of expense.splits) bump(s.memberId, 'share', toPaise(s.amount));
+    }
+    for (const s of ledger.settlements) {
+      bump(s.fromMemberId, 'sent', toPaise(s.amount));
+      bump(s.toMemberId, 'received', toPaise(s.amount));
+    }
+
+    // Everyone still in the group, plus anyone who left but has figures
+    const members = group.members
+      .filter((m) => m.status !== 'left' || totals.has(String(m._id)) || plan.nets.get(String(m._id)))
+      .map((m) => {
+        const t = totals.get(String(m._id)) || { paid: 0, share: 0, sent: 0, received: 0 };
+        return {
+          memberId: m._id,
+          paid: fromPaise(t.paid),
+          share: fromPaise(t.share),
+          sent: fromPaise(t.sent),
+          received: fromPaise(t.received),
+          net: fromPaise(plan.nets.get(String(m._id)) || 0),
+        };
+      });
+
+    return res.status(200).json({
+      summary: {
+        totalSpent: fromPaise(totalSpentPaise),
+        expenseCount: ledger.expenses.length,
+        paymentCount: ledger.settlements.length,
+        members,
+        // What each person still owes whom after payments
+        debts: plan.before.map(toTransfer),
+        simplifyDebts: group.simplifyDebts,
+        // The shorter plan, only when smart settle is on
+        smartPlan: group.simplifyDebts ? plan.after.map(toTransfer) : null,
+      },
+    });
+  } catch (error) {
+    return handleError(res, error, 'Failed to load summary');
+  }
+};
+
 // GET /api/v1/group/:id/activity?offset=&limit=  — expenses and payments, newest first
 export const getActivity = async (req, res) => {
   try {
@@ -296,9 +356,22 @@ export const getActivity = async (req, res) => {
     const sort = { date: -1, createdAt: -1, _id: -1 };
     const filter = { groupId: group._id, deletedAt: null };
 
+    // Optional filters: ?kind=expense|settlement and ?memberId= (things that person is part of)
+    const kind = ['expense', 'settlement'].includes(req.query.kind) ? req.query.kind : null;
+    const memberId = typeof req.query.memberId === 'string' && mongoose.isValidObjectId(req.query.memberId)
+      ? req.query.memberId
+      : null;
+    if (req.query.memberId && !memberId) return res.status(400).json({ message: 'Invalid member' });
+    const expenseFilter = memberId
+      ? { ...filter, $or: [{ 'paidBy.memberId': memberId }, { 'splits.memberId': memberId }] }
+      : filter;
+    const settlementFilter = memberId
+      ? { ...filter, $or: [{ fromMemberId: memberId }, { toMemberId: memberId }] }
+      : filter;
+
     const [expenses, settlements] = await Promise.all([
-      GroupExpense.find(filter).sort(sort).limit(take),
-      Settlement.find(filter).sort(sort).limit(take),
+      kind === 'settlement' ? [] : GroupExpense.find(expenseFilter).sort(sort).limit(take),
+      kind === 'expense' ? [] : Settlement.find(settlementFilter).sort(sort).limit(take),
     ]);
     const merged = [
       ...expenses.map((e) => ({ item: { kind: 'expense', ...serializeGroupExpense(e, me) }, date: e.date, createdAt: e.createdAt })),

@@ -24,6 +24,7 @@ import {
   addSettlement,
   deleteSettlement,
   getActivity,
+  getGroupSummary,
   getSettlePlan,
 } from '../controllers/settlementController.js'
 
@@ -49,6 +50,7 @@ router.patch('/:id/expenses/:expenseId', updateGroupExpense)
 router.delete('/:id/expenses/:expenseId', deleteGroupExpense)
 router.get('/:id/activity', getActivity)
 router.get('/:id/settle-plan', getSettlePlan)
+router.get('/:id/summary', getGroupSummary)
 router.post('/:id/settlements', addSettlement)
 router.delete('/:id/settlements/:settlementId', deleteSettlement)
 
